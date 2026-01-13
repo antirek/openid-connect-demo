@@ -163,24 +163,22 @@ onMounted(async () => {
     return;
   }
   
-  // Если нет токена в query, проверяем callback (session параметр)
-  const sessionInQuery = urlParams.get('session');
-  if (sessionInQuery) {
-    const callbackResult = await handleCallback();
-    if (callbackResult?.success) {
-      // Небольшая задержка для гарантии сохранения токена
-      await new Promise(resolve => setTimeout(resolve, 100));
-      
-      // Token stored, now check auth
-      try {
-        await checkAuth();
-        if (isAuthenticated.value) {
-          fetchUserInfo();
-          fetchProtectedData();
-        }
-      } catch (err) {
-        console.error('Auth check failed after callback:', err);
+  // Если нет токена в query, проверяем callback (может быть старый формат)
+  // Но сейчас provider всегда передает token напрямую
+  const callbackResult = await handleCallback();
+  if (callbackResult?.success) {
+    // Небольшая задержка для гарантии сохранения токена
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    // Token stored, now check auth
+    try {
+      await checkAuth();
+      if (isAuthenticated.value) {
+        fetchUserInfo();
+        fetchProtectedData();
       }
+    } catch (err) {
+      console.error('Auth check failed after callback:', err);
     }
     return;
   }
