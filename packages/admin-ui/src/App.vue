@@ -92,8 +92,8 @@
 
 <script setup>
 import { ref, onMounted, computed } from 'vue';
-import { api } from './api';
-import { handleTokenFromQuery, redirectToAuth } from './auth';
+import { api } from './ApiClient/api';
+import { handleTokenFromQuery, redirectToAuth, removeToken } from './auth';
 
 const user = ref(null);
 const error = ref(null);
@@ -116,48 +116,25 @@ const isAuthenticated = computed(() => !!user.value);
 
 // Инициализация: обработка токена из query параметров
 async function initializeAuth() {
-  const urlParams = new URLSearchParams(window.location.search);
-  const tokenInQuery = urlParams.get('token');
-  
-  if (!tokenInQuery) {
-    return;
-  }
-  
-  console.log('App: Token found in query, processing...');
   const tokenResult = handleTokenFromQuery();
   
   if (!tokenResult.success) {
-    console.error('App: Failed to save token from query:', tokenResult.error);
     return;
   }
   
   // Задержка для гарантии сохранения токена
   await new Promise(resolve => setTimeout(resolve, 200));
-  
-  // Проверяем, что токен действительно сохранен
-  const savedToken = localStorage.getItem('jwt_token');
-  if (!savedToken) {
-    console.error('App: Token was not saved!');
-    return;
-  }
-  
-  console.log('App: Token confirmed saved');
 }
 
 // Проверка авторизации и загрузка данных пользователя
 async function verifyAndLoadUser() {
-  const token = localStorage.getItem('jwt_token');
-  if (!token) {
-    return;
-  }
-  
   try {
     console.log('App: Checking authentication...');
-    await checkAuth();
+    const authenticated = await checkAuth();
     
-    if (isAuthenticated.value) {
-      console.log('App: Auth successful, loading user data...');
-      fetchUserInfo();
+    if (authenticated) {
+      console.log('App: Auth successful, loading protected data...');
+      // checkAuth() уже загрузил данные пользователя, загружаем только защищенные данные
       fetchProtectedData();
     } else {
       console.log('App: Auth check completed but user not authenticated');
@@ -180,37 +157,21 @@ onMounted(async () => {
 
 // Check if user is authenticated
 async function checkAuth() {
-  const token = localStorage.getItem('jwt_token');
-  if (!token) {
-    console.log('checkAuth: No token in localStorage');
+  if (!getToken()) {
+    // Нет токена = не авторизован (у нас нет сессий)
     user.value = null;
-    return;
+    return false;
   }
-  
-  console.log('checkAuth: Token found, making API request', {
-    tokenLength: token.length,
-    tokenStart: token.substring(0, 20) + '...',
-  });
   
   try {
     const data = await api.get('/user');
-    console.log('checkAuth: Success, user authenticated', data.user);
     user.value = data.user;
+    return true;
   } catch (err) {
-    console.error('Auth check failed:', {
-      status: err.response?.status,
-      statusText: err.response?.statusText,
-      error: err.response?.data,
-      message: err.message,
-    });
-    // Не удаляем токен здесь - пусть interceptor обработает 401
-    // Если это не 401, то токен может быть валидным, просто ошибка запроса
-    if (err.response?.status === 401) {
-      console.log('checkAuth: 401 received, removing token');
-      localStorage.removeItem('jwt_token');
-      user.value = null;
-    }
-    throw err; // Пробрасываем ошибку дальше
+    // Interceptor обработает 401 и сделает редирект
+    // Здесь просто очищаем user и пробрасываем ошибку
+    user.value = null;
+    throw err;
   }
 }
 
@@ -221,7 +182,7 @@ function login() {
 
 // Logout
 function logout() {
-  localStorage.removeItem('jwt_token');
+  removeToken();
   user.value = null;
   userData.value = null;
   adminData.value = null;

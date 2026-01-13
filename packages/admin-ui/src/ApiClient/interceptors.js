@@ -1,4 +1,4 @@
-import { redirectToAuth } from './auth';
+import { redirectToAuth, getToken, removeToken } from '../auth';
 
 // Флаг для предотвращения множественных редиректов
 let isRedirecting = false;
@@ -11,7 +11,7 @@ const REDIRECT_COOLDOWN = 2000; // 2 секунды между редирект�
 export function setupRequestInterceptor(apiClient) {
   apiClient.interceptors.request.use(
     (config) => {
-      const token = localStorage.getItem('jwt_token');
+      const token = getToken();
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
         // Логирование для отладки (можно убрать в production)
@@ -71,10 +71,10 @@ function handle401Error(error) {
     return Promise.reject(error);
   }
   
-  // Проверяем, есть ли токен в localStorage
-  const token = localStorage.getItem('jwt_token');
+  // Проверяем, есть ли токен
+  const token = getToken();
   if (!token) {
-    console.log('API: No token in localStorage, redirecting to auth');
+    console.log('API: No token, redirecting to auth');
   } else {
     console.log('API: Token exists but validation failed, redirecting to auth', {
       tokenLength: token.length,
@@ -83,7 +83,7 @@ function handle401Error(error) {
   }
   
   // Unauthorized - clear token and redirect to auth
-  localStorage.removeItem('jwt_token');
+  removeToken();
   
   // Устанавливаем флаг редиректа и время
   isRedirecting = true;
