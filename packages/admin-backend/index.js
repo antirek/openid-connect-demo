@@ -22,6 +22,46 @@ let issuer = null;
 let client = null;
 let jwks = null;
 
+// Хранилище использованных nonce для предотвращения replay-атак
+// В продакшене использовать Redis или БД с TTL
+// Ключ - nonce, значение - { timestamp: время использования, timeout: таймер для автоудаления }
+const usedNonces = new Map();
+
+// TTL для nonce (1 час)
+const NONCE_TTL = 60 * 60 * 1000; // 1 час в миллисекундах
+
+// Функция для удаления nonce по таймауту
+function scheduleNonceDeletion(nonce) {
+  const timeout = setTimeout(() => {
+    usedNonces.delete(nonce);
+    console.log(`Nonce auto-deleted after TTL: ${nonce.substring(0, 10)}...`);
+  }, NONCE_TTL);
+  
+  return timeout;
+}
+
+// Периодическая очистка старых nonce (на случай, если таймеры не сработали)
+// Очистка каждые 5 минут
+setInterval(() => {
+  const now = Date.now();
+  let cleaned = 0;
+  
+  for (const [nonce, data] of usedNonces.entries()) {
+    if (now - data.timestamp > NONCE_TTL) {
+      // Очищаем таймер, если он еще не сработал
+      if (data.timeout) {
+        clearTimeout(data.timeout);
+      }
+      usedNonces.delete(nonce);
+      cleaned++;
+    }
+  }
+  
+  if (cleaned > 0) {
+    console.log(`Cleaned up ${cleaned} expired nonces`);
+  }
+}, 5 * 60 * 1000); // Каждые 5 минут
+
 async function getClient() {
   if (!issuer) {
     issuer = await Issuer.discover(PROVIDER_URL);
@@ -160,9 +200,60 @@ const validateJWT = async (req, res, next) => {
       });
     }
     
+    // Валидация nonce для защиты от replay-атак
+    if (!verifiedPayload.nonce) {
+      console.log('JWT validation: Missing nonce in token');
+      return res.status(401).json({
+        error: 'invalid_nonce',
+        message: 'Nonce is required in ID Token',
+      });
+    }
+    
+    // Проверка формата nonce (должен быть непустой строкой)
+    if (typeof verifiedPayload.nonce !== 'string' || verifiedPayload.nonce.length === 0) {
+      console.log('JWT validation: Invalid nonce format');
+      return res.status(401).json({
+        error: 'invalid_nonce',
+        message: 'Invalid nonce format in ID Token',
+      });
+    }
+    
+    // Проверка, что nonce не был использован ранее (защита от replay-атак)
+    const existingNonce = usedNonces.get(verifiedPayload.nonce);
+    if (existingNonce) {
+      // Проверяем, не истек ли срок действия nonce
+      const now = Date.now();
+      if (now - existingNonce.timestamp < NONCE_TTL) {
+        console.log('JWT validation: Nonce already used (replay attack detected)', {
+          nonce: verifiedPayload.nonce.substring(0, 10) + '...',
+          firstUsed: new Date(existingNonce.timestamp).toISOString(),
+          age: Math.round((now - existingNonce.timestamp) / 1000) + 's',
+        });
+        return res.status(401).json({
+          error: 'nonce_reused',
+          message: 'Nonce has already been used (possible replay attack)',
+        });
+      } else {
+        // Nonce истек, удаляем его и разрешаем использование
+        if (existingNonce.timeout) {
+          clearTimeout(existingNonce.timeout);
+        }
+        usedNonces.delete(verifiedPayload.nonce);
+        console.log('JWT validation: Expired nonce removed, allowing reuse');
+      }
+    }
+    
+    // Сохраняем nonce как использованный с таймером для автоудаления
+    const timeout = scheduleNonceDeletion(verifiedPayload.nonce);
+    usedNonces.set(verifiedPayload.nonce, {
+      timestamp: Date.now(),
+      timeout: timeout,
+    });
+    console.log('JWT validation: Nonce validated and marked as used (will auto-delete in 1 hour)');
+    
     // Используем payload из валидированного токена
     // Это гарантирует, что токен не был подделан
-    // jwtVerify уже проверил exp, iss, aud, поэтому можем доверять verifiedPayload
+    // jwtVerify уже проверил exp, iss, aud, nonce проверен выше
     req.user = {
       sub: verifiedPayload.sub,
       name: verifiedPayload.name,
