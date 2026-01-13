@@ -1,5 +1,6 @@
 import express from 'express';
 import { Issuer } from 'openid-client';
+import { jwtVerify, createRemoteJWKSet } from 'jose';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -19,6 +20,7 @@ app.use(express.urlencoded({ extended: true }));
 // Получение или создание клиента для валидации
 let issuer = null;
 let client = null;
+let jwks = null;
 
 async function getClient() {
   if (!issuer) {
@@ -27,8 +29,15 @@ async function getClient() {
     client = new issuer.Client({
       client_id: CLIENT_ID,
     });
+    
+    // Создаем JWKS endpoint для валидации подписи
+    // JWKS endpoint обычно находится по адресу: {issuer}/.well-known/jwks.json
+    const jwksUri = new URL('/.well-known/jwks.json', issuer.issuer).href;
+    jwks = createRemoteJWKSet(new URL(jwksUri));
+    
+    console.log('JWKS endpoint configured:', jwksUri);
   }
-  return { issuer, client };
+  return { issuer, client, jwks };
 }
 
 // Middleware для валидации JWT
@@ -59,9 +68,9 @@ const validateJWT = async (req, res, next) => {
       });
     }
     
-    const { issuer, client } = await getClient();
+    const { issuer } = await getClient();
     
-    // Декодируем JWT для проверки базовых claims
+    // Проверка базового формата JWT (3 части: header.payload.signature)
     const parts = token.split('.');
     if (parts.length !== 3) {
       console.log('JWT validation: Invalid format, parts:', parts.length);
@@ -71,29 +80,30 @@ const validateJWT = async (req, res, next) => {
       });
     }
     
-    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString());
-    console.log('JWT validation: Token payload:', {
-      sub: payload.sub,
-      aud: payload.aud,
-      iss: payload.iss,
-      exp: payload.exp,
-      iat: payload.iat,
-      role: payload.role,
-    });
-    
-    // Проверка срока действия
-    if (payload.exp && payload.exp * 1000 < Date.now()) {
-      console.log('JWT validation: Token expired', {
-        exp: payload.exp * 1000,
-        now: Date.now(),
+    // Декодируем payload только для логирования (проверка будет через jwtVerify)
+    let payload;
+    try {
+      payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString());
+      console.log('JWT validation: Token payload (before JWKS verification):', {
+        sub: payload.sub,
+        aud: payload.aud,
+        iss: payload.iss,
+        exp: payload.exp,
+        iat: payload.iat,
+        role: payload.role,
       });
+    } catch (decodeError) {
+      console.error('JWT validation: Failed to decode payload:', decodeError.message);
       return res.status(401).json({
-        error: 'token_expired',
-        message: 'JWT token has expired',
+        error: 'invalid_token',
+        message: 'Failed to decode JWT payload',
       });
     }
     
-    // Проверка issuer
+    // Базовые проверки перед JWKS валидацией (для раннего обнаружения проблем)
+    // Основная валидация (exp, iss, aud, signature) будет выполнена в jwtVerify
+    
+    // Проверка issuer (быстрая проверка перед JWKS)
     if (payload.iss !== issuer.issuer) {
       console.log('JWT validation: Invalid issuer', {
         token_iss: payload.iss,
@@ -105,8 +115,7 @@ const validateJWT = async (req, res, next) => {
       });
     }
     
-    // Проверка client_id (audience)
-    // Токен должен быть выдан для admin-ui (это backend для admin-ui)
+    // Проверка audience (быстрая проверка перед JWKS)
     const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
     if (!aud.includes('admin-ui')) {
       console.log('JWT validation: Invalid audience', {
@@ -119,19 +128,46 @@ const validateJWT = async (req, res, next) => {
       });
     }
     
-    // Валидация подписи
-    // Для демо пропускаем полную проверку подписи через JWKS,
-    // так как issuer, audience, exp уже проверены выше
-    // В продакшене нужно использовать полную валидацию через JWKS
-    // Токен приходит от нашего же provider, поэтому можем доверять ему
-    console.log('JWT validation: Token validated (issuer, audience, exp checked)');
+    // Валидация подписи через JWKS
+    const { issuer: issuerObj, jwks: jwksSet } = await getClient();
     
-    // Токен валиден - добавляем данные пользователя в request
+    let verifiedPayload;
+    try {
+      // Валидируем подпись токена используя JWKS
+      // jwtVerify автоматически:
+      // 1. Получает ключи из JWKS endpoint
+      // 2. Находит правильный ключ по kid из header токена
+      // 3. Проверяет подпись
+      // 4. Проверяет exp, nbf, iss, aud (если указаны в options)
+      const result = await jwtVerify(token, jwksSet, {
+        issuer: issuerObj.issuer,
+        audience: 'admin-ui',
+      });
+      
+      verifiedPayload = result.payload;
+      console.log('JWT validation: Token signature validated successfully via JWKS');
+    } catch (jwtVerifyError) {
+      console.error('JWT validation: Signature verification failed:', jwtVerifyError.message);
+      console.error('JWT validation: Error details:', {
+        name: jwtVerifyError.name,
+        code: jwtVerifyError.code,
+        message: jwtVerifyError.message,
+      });
+      return res.status(401).json({
+        error: 'invalid_signature',
+        message: 'JWT signature validation failed',
+        details: jwtVerifyError.message,
+      });
+    }
+    
+    // Используем payload из валидированного токена
+    // Это гарантирует, что токен не был подделан
+    // jwtVerify уже проверил exp, iss, aud, поэтому можем доверять verifiedPayload
     req.user = {
-      sub: payload.sub,
-      name: payload.name,
-      email: payload.email,
-      role: payload.role, // Роль пользователя для этого приложения
+      sub: verifiedPayload.sub,
+      name: verifiedPayload.name,
+      email: verifiedPayload.email,
+      role: verifiedPayload.role, // Роль пользователя для этого приложения
     };
     
     req.token = token;
