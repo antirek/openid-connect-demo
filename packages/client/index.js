@@ -20,7 +20,7 @@ const pkceStorage = new Map();
 const clientRedirectUrls = {
   'demo-client': 'http://localhost:3001/',
   'app2': 'http://localhost:3001/',
-  'admin-ui': 'http://localhost:3003/',
+  'admin-ui': 'http://localhost:3002/',
 };
 
 // Простое хранилище токенов по session ID (только для передачи токена после callback)

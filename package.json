@@ -8,15 +8,13 @@
   ],
   "scripts": {
     "start:provider": "npm run start --workspace=@demo/provider",
-    "start:client": "npm run start --workspace=@demo/client",
     "start:admin-backend": "npm run start --workspace=@demo/admin-backend",
-    "start:admin-ui": "npm run dev --workspace=@demo/admin-ui",
-    "start:all": "concurrently \"npm run start:provider\" \"npm run start:client\" \"npm run start:admin-backend\" \"npm run start:admin-ui\"",
+    "build:admin-ui": "npm run build --workspace=@demo/admin-ui",
+    "start:all": "npm run build:admin-ui && concurrently \"npm run start:provider\" \"npm run start:admin-backend\"",
     "dev:provider": "npm run dev --workspace=@demo/provider",
-    "dev:client": "npm run dev --workspace=@demo/client",
     "dev:admin-backend": "npm run dev --workspace=@demo/admin-backend",
     "dev:admin-ui": "npm run dev --workspace=@demo/admin-ui",
-    "dev:all": "concurrently \"npm run dev:provider\" \"npm run dev:client\" \"npm run dev:admin-backend\" \"npm run dev:admin-ui\"",
+    "dev:all": "concurrently \"npm run dev:provider\" \"npm run dev:admin-backend\" \"npm run dev:admin-ui\"",
     "install:all": "npm install"
   },
   "devDependencies": {

@@ -94,6 +94,7 @@
 import { ref, onMounted, computed } from 'vue';
 import { api } from './api';
 import { handleCallback } from './callback';
+import { handleTokenFromQuery, redirectToAuth } from './auth';
 
 const user = ref(null);
 const error = ref(null);
@@ -116,50 +117,96 @@ const isAuthenticated = computed(() => !!user.value);
 
 // Check authentication on mount
 onMounted(async () => {
-  // Handle OIDC callback if present
-  const callbackResult = await handleCallback();
-  if (callbackResult?.success) {
-    // Token stored, now check auth
-    await checkAuth();
-  } else if (callbackResult?.error) {
-    error.value = callbackResult.error;
+  // Сначала проверяем, есть ли токен в query параметрах (после авторизации)
+  const urlParams = new URLSearchParams(window.location.search);
+  const tokenInQuery = urlParams.get('token');
+  
+  if (tokenInQuery) {
+    // Токен в query - сохраняем и очищаем URL
+    const tokenResult = handleTokenFromQuery();
+    if (tokenResult.success) {
+      // Небольшая задержка для гарантии сохранения токена
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Проверяем авторизацию
+      try {
+        await checkAuth();
+        if (isAuthenticated.value) {
+          fetchUserInfo();
+          fetchProtectedData();
+        }
+      } catch (err) {
+        console.error('Auth check failed after token from query:', err);
+        // Если проверка не удалась, не редиректим снова - токен уже сохранен
+      }
+    }
+    return;
   }
   
-  await checkAuth();
-  if (isAuthenticated.value) {
-    fetchUserInfo();
-    fetchProtectedData();
+  // Если нет токена в query, проверяем callback (session параметр)
+  const sessionInQuery = urlParams.get('session');
+  if (sessionInQuery) {
+    const callbackResult = await handleCallback();
+    if (callbackResult?.success) {
+      // Небольшая задержка для гарантии сохранения токена
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Token stored, now check auth
+      try {
+        await checkAuth();
+        if (isAuthenticated.value) {
+          fetchUserInfo();
+          fetchProtectedData();
+        }
+      } catch (err) {
+        console.error('Auth check failed after callback:', err);
+      }
+    }
+    return;
+  }
+  
+  // Если нет callback параметров, проверяем существующий токен
+  const existingToken = localStorage.getItem('jwt_token');
+  if (existingToken) {
+    try {
+      await checkAuth();
+      if (isAuthenticated.value) {
+        fetchUserInfo();
+        fetchProtectedData();
+      }
+    } catch (err) {
+      console.error('Auth check failed with existing token:', err);
+      // Токен невалидный - будет редирект через interceptor при следующем запросе
+    }
   }
 });
 
 // Check if user is authenticated
 async function checkAuth() {
   const token = localStorage.getItem('jwt_token');
-  if (token) {
-    try {
-      const data = await api.get('/api/user');
-      user.value = data.user;
-    } catch (err) {
-      console.error('Auth check failed:', err);
+  if (!token) {
+    user.value = null;
+    return;
+  }
+  
+  try {
+    const data = await api.get('/user');
+    user.value = data.user;
+  } catch (err) {
+    console.error('Auth check failed:', err);
+    // Не удаляем токен здесь - пусть interceptor обработает 401
+    // Если это не 401, то токен может быть валидным, просто ошибка запроса
+    if (err.response?.status === 401) {
       localStorage.removeItem('jwt_token');
       user.value = null;
     }
+    throw err; // Пробрасываем ошибку дальше
   }
 }
 
 // Login - redirect to provider
 function login() {
-  const providerUrl = 'http://localhost:3000';
-  const clientId = 'admin-ui';
-  const redirectUri = encodeURIComponent('http://localhost:3001/callback');
-  const scope = 'openid profile email';
-  
-  const authUrl = `${providerUrl}/auth?client_id=${clientId}&response_type=code&redirect_uri=${redirectUri}&scope=${scope}`;
-  
-  // Store current URL to return after login
-  sessionStorage.setItem('return_url', window.location.href);
-  
-  window.location.href = authUrl;
+  redirectToAuth();
 }
 
 // Logout
@@ -181,7 +228,7 @@ async function fetchUserInfo() {
   loading.value = true;
   error.value = null;
   try {
-    userData.value = await api.get('/api/user');
+    userData.value = await api.get('/user');
     user.value = userData.value.user;
   } catch (err) {
     error.value = err.response?.data?.message || err.message || 'Failed to fetch user info';
@@ -198,7 +245,7 @@ async function fetchAdminData() {
   adminLoading.value = true;
   error.value = null;
   try {
-    adminData.value = await api.get('/api/admin');
+    adminData.value = await api.get('/admin');
     success.value = 'Admin data fetched successfully';
     setTimeout(() => {
       success.value = null;
@@ -218,7 +265,7 @@ async function fetchProtectedData() {
   dataLoading.value = true;
   error.value = null;
   try {
-    protectedData.value = await api.get('/api/data');
+    protectedData.value = await api.get('/data');
   } catch (err) {
     error.value = err.response?.data?.message || err.message || 'Failed to fetch protected data';
     if (err.response?.status === 401) {
@@ -236,7 +283,7 @@ async function createData() {
   success.value = null;
   
   try {
-    const response = await api.post('/api/data', newData.value);
+    const response = await api.post('/data', newData.value);
     success.value = 'Data created successfully';
     newData.value = { title: '', description: '' };
     fetchProtectedData(); // Refresh data list

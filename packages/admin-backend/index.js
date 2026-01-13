@@ -1,5 +1,10 @@
 import express from 'express';
 import { Issuer } from 'openid-client';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const PORT = process.env.PORT || 3002;
 const PROVIDER_URL = process.env.PROVIDER_URL || 'http://localhost:3000';
@@ -155,8 +160,32 @@ const requireRole = (...allowedRoles) => {
 };
 
 // Публичный endpoint (без валидации)
-app.get('/health', (req, res) => {
+app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Endpoint для получения токена по session ID (для admin-ui)
+app.get('/api/token', async (req, res) => {
+  const session = req.query.session;
+  
+  if (!session) {
+    return res.status(400).json({ error: 'session parameter required' });
+  }
+  
+  // Получаем токен из provider (теперь provider и client объединены)
+  try {
+    const providerResponse = await fetch(`http://localhost:3000/api/token?session=${session}`);
+    const data = await providerResponse.json();
+    
+    if (data.token) {
+      return res.json({ token: data.token });
+    }
+    
+    return res.status(404).json({ error: 'Token not found' });
+  } catch (error) {
+    console.error('Error fetching token from provider:', error);
+    return res.status(500).json({ error: 'Failed to fetch token' });
+  }
 });
 
 // Защищенный endpoint (требует JWT)
@@ -198,10 +227,24 @@ app.post('/api/data', validateJWT, requireRole('admin', 'user'), (req, res) => {
   });
 });
 
+// Раздача статических файлов admin-ui (после API routes)
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Fallback для SPA - все остальные запросы отдаем index.html
+app.get('*', (req, res) => {
+  // Не обрабатываем API запросы
+  if (req.path.startsWith('/api')) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
 app.listen(PORT, () => {
   console.log(`Admin Backend API running at http://localhost:${PORT}`);
-  console.log(`\nEndpoints:`);
-  console.log(`  GET  /health          - Public health check`);
+  console.log(`Admin UI available at http://localhost:${PORT}`);
+  console.log(`\nAPI Endpoints:`);
+  console.log(`  GET  /api/health      - Public health check`);
+  console.log(`  GET  /api/token       - Get JWT token by session ID (for admin-ui)`);
   console.log(`  GET  /api/user        - Get user info (requires JWT)`);
   console.log(`  GET  /api/admin       - Admin only (requires JWT + admin role)`);
   console.log(`  GET  /api/data        - Protected data (requires JWT + admin/user role)`);

@@ -1,5 +1,6 @@
 import express from 'express';
 import Provider from 'oidc-provider';
+import { Issuer, generators } from 'openid-client';
 
 const PORT = process.env.PORT || 3000;
 const ISSUER = `http://localhost:${PORT}`;
@@ -17,7 +18,7 @@ const applications = [
     client_id: 'demo-client', 
     name: 'Demo Application', 
     secret: 'demo-secret',
-    redirect_url: 'http://localhost:3001/', // URL для переадресации после успешного логина
+    redirect_url: 'http://localhost:3002/', // URL для переадресации после успешного логина
   },
   { 
     client_id: 'app2', 
@@ -29,7 +30,7 @@ const applications = [
     client_id: 'admin-ui', 
     name: 'Admin UI', 
     secret: 'admin-ui-secret',
-    redirect_url: 'http://localhost:3003/', // URL для переадресации после успешного логина
+    redirect_url: 'http://localhost:3002/', // URL для переадресации после успешного логина
   },
 ];
 
@@ -65,8 +66,7 @@ const configuration = {
     client_id: app.client_id,
     client_secret: app.secret,
     redirect_uris: [
-      `http://localhost:3001/callback`, // Основной callback для всех клиентов
-      ...(app.client_id === 'admin-ui' ? [`http://localhost:3003/callback`] : []), // Специальный callback для admin-ui
+      `http://localhost:${PORT}/client/callback`, // Callback для client flow (теперь в provider)
     ],
     response_types: ['code'],
     grant_types: ['authorization_code', 'refresh_token'],
@@ -302,8 +302,217 @@ app.use('/interaction/:uid', async (req, res, next) => {
   }
 });
 
-// Подключаем OIDC Provider routes
+// ========== OIDC Client функциональность ==========
+
+// Временное хранилище для PKCE flow (только между началом авторизации и callback)
+// Ключ - state, значение - { codeVerifier, nonce, redirectUrl, clientId }
+const pkceStorage = new Map();
+
+// Простое хранилище токенов по session ID (только для передачи токена после callback)
+// Ключ - короткий session ID, значение - tokenSet
+const tokenStorage = new Map();
+
+// Получение или создание OIDC клиента для конкретного client_id
+async function getOidcClient(clientId) {
+  const app = applications.find(a => a.client_id === clientId);
+  if (!app) {
+    throw new Error(`Client ${clientId} not found`);
+  }
+  
+  const issuer = await Issuer.discover(ISSUER);
+  const client = new issuer.Client({
+    client_id: app.client_id,
+    client_secret: app.secret,
+    redirect_uris: [`http://localhost:${PORT}/client/callback`],
+    response_types: ['code'],
+  });
+  
+  return { issuer, client };
+}
+
+// Начало процесса авторизации (OIDC Client)
+app.get('/client/auth', async (req, res) => {
+  try {
+    const clientId = req.query.client_id || 'demo-client';
+    const { client } = await getOidcClient(clientId);
+    
+    // Генерация code_verifier и code_challenge для PKCE
+    const codeVerifier = generators.codeVerifier();
+    const codeChallenge = generators.codeChallenge(codeVerifier);
+    
+    // Генерация state и nonce
+    const state = generators.random();
+    const nonce = generators.random();
+    
+    // Получаем redirect_url для этого клиента
+    const redirectUrl = clientRedirectUrls[clientId] || 'http://localhost:3001/';
+    
+    // Временно сохраняем для PKCE (будет удалено после callback)
+    pkceStorage.set(state, { codeVerifier, nonce, redirectUrl, clientId });
+    
+    // Параметры авторизации
+    const authUrl = client.authorizationUrl({
+      redirect_uri: `http://localhost:${PORT}/client/callback`,
+      scope: 'openid profile email',
+      code_challenge: codeChallenge,
+      code_challenge_method: 'S256',
+      state,
+      nonce,
+    });
+    
+    res.redirect(authUrl);
+  } catch (error) {
+    console.error('Client auth error:', error);
+    res.status(500).send(`Error: ${error.message}`);
+  }
+});
+
+// Callback от provider (OIDC Client) - используем отдельный путь
+app.get('/client/callback', async (req, res) => {
+  try {
+    const params = req.query;
+    
+    // Проверка наличия обязательных параметров
+    if (!params.state) {
+      return res.status(400).send(`
+        <html>
+          <head><title>Error</title></head>
+          <body>
+            <h1>Invalid callback: missing state parameter</h1>
+            <p><a href="/client/auth">Try again</a></p>
+          </body>
+        </html>
+      `);
+    }
+    
+    // Получаем PKCE данные
+    const pkceData = pkceStorage.get(params.state);
+    if (!pkceData) {
+      return res.status(400).send(`
+        <html>
+          <head><title>Error</title></head>
+          <body>
+            <h1>Invalid callback: PKCE data not found or expired</h1>
+            <p><a href="/client/auth">Try again</a></p>
+          </body>
+        </html>
+      `);
+    }
+    
+    // Если есть ошибка от provider
+    if (params.error) {
+      pkceStorage.delete(params.state);
+      return res.status(400).send(`
+        <html>
+          <head><title>Error</title></head>
+          <body>
+            <h1>Authentication Error</h1>
+            <p><strong>Error:</strong> ${params.error}</p>
+            <p><strong>Description:</strong> ${params.error_description || 'No description'}</p>
+            <p><a href="/client/auth">Try again</a></p>
+          </body>
+        </html>
+      `);
+    }
+    
+    if (!params.code) {
+      pkceStorage.delete(params.state);
+      return res.status(400).send(`
+        <html>
+          <head><title>Error</title></head>
+          <body>
+            <h1>Invalid callback: missing code parameter</h1>
+            <p><a href="/client/auth">Try again</a></p>
+          </body>
+        </html>
+      `);
+    }
+    
+    const { client } = await getOidcClient(pkceData.clientId);
+    const { codeVerifier, nonce, redirectUrl } = pkceData;
+    
+    // Обмен кода на токены
+    const tokenSet = await client.callback(
+      `http://localhost:${PORT}/client/callback`,
+      params,
+      {
+        code_verifier: codeVerifier,
+        state: params.state,
+        nonce,
+      }
+    );
+    
+    // Очищаем временные PKCE данные
+    pkceStorage.delete(params.state);
+    
+    // Валидация токенов
+    const claims = tokenSet.claims();
+    
+    if (!claims || !claims.sub) {
+      throw new Error('No sub claim in token');
+    }
+    
+    console.log('Token set received:', {
+      sub: claims.sub,
+      access_token: tokenSet.access_token ? 'present' : 'absent',
+      id_token: tokenSet.id_token ? 'present' : 'absent',
+      refresh_token: tokenSet.refresh_token ? 'present' : 'absent',
+    });
+    
+    // Получаем токен (ID токен или access token)
+    const token = tokenSet.id_token || tokenSet.access_token;
+    
+    // Редиректим на URL из конфигурации приложения с токеном в query
+    const finalRedirectUrl = new URL(redirectUrl);
+    finalRedirectUrl.searchParams.set('token', token);
+    res.redirect(finalRedirectUrl.toString());
+  } catch (error) {
+    console.error('Callback error:', error);
+    
+    // Очистка при ошибке
+    if (req.query.state) {
+      pkceStorage.delete(req.query.state);
+    }
+    
+    res.status(500).send(`
+      <html>
+        <head><title>Error</title></head>
+        <body>
+          <h1>Error during authentication</h1>
+          <p>${error.message}</p>
+          <p><a href="/client/auth">Try again</a></p>
+        </body>
+      </html>
+    `);
+  }
+});
+
+// Подключаем OIDC Provider routes (после client routes)
 app.use(provider.callback());
+
+// API endpoint для получения токена по session ID
+app.get('/api/token', (req, res) => {
+  const sessionId = req.query.session;
+  
+  if (!sessionId) {
+    return res.status(400).json({ error: 'session parameter required' });
+  }
+  
+  const tokenSet = tokenStorage.get(sessionId);
+  
+  if (!tokenSet) {
+    return res.status(404).json({ error: 'session not found or expired' });
+  }
+  
+  // Возвращаем ID токен или access token
+  const token = tokenSet.id_token || tokenSet.access_token;
+  
+  if (!token) {
+    return res.status(404).json({ error: 'token not found' });
+  }
+  
+  res.json({ token });
+});
 
 // Health check
 app.get('/health', (req, res) => {
@@ -312,8 +521,13 @@ app.get('/health', (req, res) => {
 
 // Запуск сервера
 app.listen(PORT, () => {
-  console.log(`OIDC Provider running at ${ISSUER}`);
+  console.log(`OIDC Provider + Client running at ${ISSUER}`);
   console.log(`Discovery: ${ISSUER}/.well-known/openid-configuration`);
+  console.log(`\nEndpoints:`);
+  console.log(`  GET  /client/auth        - Start OIDC client flow`);
+  console.log(`  GET  /client/callback    - OIDC client callback`);
+  console.log(`  GET  /api/token          - Get JWT token by session ID`);
+  console.log(`  GET  /health             - Health check`);
   console.log(`\nTest users:`);
   users.forEach(user => {
     console.log(`  ${user.id} / ${user.password}`);

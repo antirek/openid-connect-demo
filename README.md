@@ -6,16 +6,18 @@
 
 Проект состоит из трех компонентов:
 
-- **`packages/provider`** - OIDC Provider (авторизационный сервер)
-  - Список пользователей
-  - Список приложений (clients)
-  - Маппинг пользователь -> приложение -> роль
-  - Выдает JWT токены с ролью пользователя для конкретного приложения
-
-- **`packages/client`** - OIDC Client (веб-приложение)
-  - Получает JWT токен от provider
-  - Сохраняет токен
-  - Отображает информацию о пользователе и роли
+- **`packages/provider`** - OIDC Provider + Client (объединенный сервер)
+  - OIDC Provider (авторизационный сервер):
+    - Список пользователей
+    - Список приложений (clients)
+    - Маппинг пользователь -> приложение -> роль
+    - Выдает JWT токены с ролью пользователя для конкретного приложения
+  - OIDC Client функциональность:
+    - Обработка OIDC flow для получения токенов
+    - Хранение токенов по session ID
+    - Endpoint `/api/token` для получения токена
+    - Endpoint `/client/auth` для начала авторизации
+    - Endpoint `/client/callback` для обработки callback
 
 - **`packages/admin-backend`** - Admin Backend API с JWT валидацией
   - Middleware для валидации JWT токенов
@@ -52,26 +54,24 @@ npm run dev:all
 ### Запуск отдельных сервисов
 
 ```bash
-# Provider (порт 3000)
+# Provider + Client (порт 3000) - объединенный сервер
 npm run start:provider
 
-# Client (порт 3001)
-npm run start:client
-
-# Admin Backend (порт 3002)
+# Admin Backend (порт 3002) - включает Admin UI после билда
+npm run build:admin-ui  # Сначала собрать admin-ui в admin-backend/public
 npm run start:admin-backend
 
-# Admin UI (порт 3003)
-npm run start:admin-ui
+# Admin UI (dev режим, порт 3003)
+npm run dev:admin-ui
 ```
 
 ## Использование
 
-1. Запустите все сервисы: `npm run start:all`
-2. Откройте браузер и перейдите на:
-   - `http://localhost:3001` - Client приложение
-   - `http://localhost:3003` - Admin UI
-3. Вы будете перенаправлены на страницу логина provider
+1. Соберите admin-ui: `npm run build:admin-ui`
+2. Запустите все сервисы: `npm run start:all`
+3. Откройте браузер и перейдите на:
+   - `http://localhost:3002` - Admin UI (раздается через admin-backend)
+4. Вы будете перенаправлены на страницу логина provider
 4. Войдите с одним из тестовых пользователей (см. ниже)
 5. После успешного входа вы получите JWT токен с ролью пользователя для этого приложения
 6. Используйте токен для вызова admin-backend API или работы через Admin UI
@@ -119,11 +119,13 @@ const applications = [
 
 ## Admin Backend API
 
-Admin Backend API доступен на `http://localhost:3002`:
+Admin Backend доступен на `http://localhost:3002`:
+- **Admin UI** - `http://localhost:3002` (после билда admin-ui)
+- **API** - все запросы начинаются с `/api`
 
-### Endpoints
+### API Endpoints
 
-- `GET /health` - Публичный health check
+- `GET /api/health` - Публичный health check
 - `GET /api/user` - Информация о пользователе (требует JWT)
 - `GET /api/admin` - Только для admin (требует JWT + роль admin)
 - `GET /api/data` - Защищенные данные (требует JWT + роль admin или user)
@@ -144,21 +146,23 @@ curl -H "Authorization: Bearer <JWT_TOKEN>" http://localhost:3002/api/data
 
 ## Flow аутентификации
 
-1. **Client** редиректит пользователя на **Provider** с `client_id`
-2. **Provider** показывает форму логина
-3. После успешного логина **Provider**:
+1. Приложение (например, Admin UI) редиректит пользователя на **Provider** через `/client/auth?client_id=...`
+2. **Provider** (OIDC Client часть) инициирует OIDC flow и редиректит на **Provider** (OIDC Provider часть) для логина
+3. **Provider** показывает форму логина
+4. После успешного логина **Provider**:
    - Проверяет маппинг пользователь -> приложение -> роль
    - Если пользователь имеет доступ к приложению, создает JWT с ролью
-   - Редиректит обратно в **Client** с authorization code
-4. **Client** обменивает code на JWT токен
-5. **Client** сохраняет JWT токен
-6. Все запросы к **Admin Backend** идут с JWT в заголовке `Authorization: Bearer <token>`
-7. **Admin Backend** валидирует JWT через middleware:
+   - Редиректит обратно в **Provider** (Client часть) на `/client/callback` с authorization code
+5. **Provider** (Client часть) обменивает code на JWT токен
+6. **Provider** сохраняет JWT токен и редиректит на `redirect_url` приложения с session ID
+7. Приложение получает токен через `/api/token?session=...` (на том же Provider сервере)
+8. Все запросы к **Admin Backend** идут с JWT в заголовке `Authorization: Bearer <token>`
+9. **Admin Backend** валидирует JWT через middleware:
    - Проверяет подпись
    - Проверяет срок действия
    - Проверяет issuer и audience
    - Извлекает роль пользователя
-8. Если JWT валиден - запрос обрабатывается, иначе возвращается 401
+10. Если JWT валиден - запрос обрабатывается, иначе возвращается 401
 
 ## Особенности
 
