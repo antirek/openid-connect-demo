@@ -1,0 +1,211 @@
+import express from 'express';
+import { Issuer } from 'openid-client';
+
+const PORT = process.env.PORT || 3002;
+const PROVIDER_URL = process.env.PROVIDER_URL || 'http://localhost:3000';
+const CLIENT_ID = process.env.CLIENT_ID || 'demo-client';
+
+const app = express();
+
+// Middleware для парсинга body
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Получение или создание клиента для валидации
+let issuer = null;
+let client = null;
+
+async function getClient() {
+  if (!issuer) {
+    issuer = await Issuer.discover(PROVIDER_URL);
+    client = new issuer.Client({
+      client_id: CLIENT_ID,
+    });
+  }
+  return { issuer, client };
+}
+
+// Middleware для валидации JWT
+const validateJWT = async (req, res, next) => {
+  try {
+    // Получаем JWT из Authorization header
+    const authHeader = req.headers.authorization;
+    
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      // Нет токена - редиректим на provider для логина
+      const { issuer } = await getClient();
+      const authUrl = `${issuer.issuer}/auth?client_id=${CLIENT_ID}&response_type=code&redirect_uri=http://localhost:3001/callback&scope=openid`;
+      return res.status(401).json({
+        error: 'unauthorized',
+        message: 'JWT token required',
+        auth_url: authUrl,
+      });
+    }
+    
+    const token = authHeader.replace('Bearer ', '');
+    
+    if (!token) {
+      return res.status(401).json({
+        error: 'unauthorized',
+        message: 'JWT token required',
+      });
+    }
+    
+    const { issuer, client } = await getClient();
+    
+    // Декодируем JWT для проверки базовых claims
+    const parts = token.split('.');
+    if (parts.length !== 3) {
+      return res.status(401).json({
+        error: 'invalid_token',
+        message: 'Invalid JWT format',
+      });
+    }
+    
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString());
+    
+    // Проверка срока действия
+    if (payload.exp && payload.exp * 1000 < Date.now()) {
+      return res.status(401).json({
+        error: 'token_expired',
+        message: 'JWT token has expired',
+      });
+    }
+    
+    // Проверка issuer
+    if (payload.iss !== issuer.issuer) {
+      return res.status(401).json({
+        error: 'invalid_issuer',
+        message: 'Invalid token issuer',
+      });
+    }
+    
+    // Проверка client_id (audience)
+    const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+    if (!aud.includes(CLIENT_ID)) {
+      return res.status(401).json({
+        error: 'invalid_audience',
+        message: 'Token not issued for this client',
+      });
+    }
+    
+    // Валидация подписи через openid-client
+    const tokenSet = {
+      id_token: token,
+      claims() {
+        return payload;
+      },
+    };
+    
+    try {
+      await client.validateIdToken(tokenSet);
+    } catch (validationError) {
+      return res.status(401).json({
+        error: 'invalid_signature',
+        message: 'JWT signature validation failed',
+        details: validationError.message,
+      });
+    }
+    
+    // Токен валиден - добавляем данные пользователя в request
+    req.user = {
+      sub: payload.sub,
+      name: payload.name,
+      email: payload.email,
+      role: payload.role, // Роль пользователя для этого приложения
+    };
+    
+    req.token = token;
+    next();
+  } catch (error) {
+    console.error('JWT validation error:', error);
+    return res.status(401).json({
+      error: 'validation_error',
+      message: error.message,
+    });
+  }
+};
+
+// Middleware для проверки роли
+const requireRole = (...allowedRoles) => {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({
+        error: 'unauthorized',
+        message: 'User not authenticated',
+      });
+    }
+    
+    if (!req.user.role) {
+      return res.status(403).json({
+        error: 'forbidden',
+        message: 'User role not found in token',
+      });
+    }
+    
+    if (!allowedRoles.includes(req.user.role)) {
+      return res.status(403).json({
+        error: 'forbidden',
+        message: `Access denied. Required roles: ${allowedRoles.join(', ')}. User role: ${req.user.role}`,
+      });
+    }
+    
+    next();
+  };
+};
+
+// Публичный endpoint (без валидации)
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Защищенный endpoint (требует JWT)
+app.get('/api/user', validateJWT, (req, res) => {
+  res.json({
+    message: 'User information',
+    user: req.user,
+  });
+});
+
+// Защищенный endpoint только для admin
+app.get('/api/admin', validateJWT, requireRole('admin'), (req, res) => {
+  res.json({
+    message: 'Admin endpoint',
+    user: req.user,
+    data: {
+      secret: 'This is admin-only data',
+    },
+  });
+});
+
+// Защищенный endpoint для admin и user
+app.get('/api/data', validateJWT, requireRole('admin', 'user'), (req, res) => {
+  res.json({
+    message: 'Protected data',
+    user: req.user,
+    data: {
+      items: ['item1', 'item2', 'item3'],
+    },
+  });
+});
+
+// Пример POST endpoint
+app.post('/api/data', validateJWT, requireRole('admin', 'user'), (req, res) => {
+  res.json({
+    message: 'Data created',
+    user: req.user,
+    created: req.body,
+  });
+});
+
+app.listen(PORT, () => {
+  console.log(`Admin Backend API running at http://localhost:${PORT}`);
+  console.log(`\nEndpoints:`);
+  console.log(`  GET  /health          - Public health check`);
+  console.log(`  GET  /api/user        - Get user info (requires JWT)`);
+  console.log(`  GET  /api/admin       - Admin only (requires JWT + admin role)`);
+  console.log(`  GET  /api/data        - Protected data (requires JWT + admin/user role)`);
+  console.log(`  POST /api/data        - Create data (requires JWT + admin/user role)`);
+  console.log(`\nUsage:`);
+  console.log(`  curl -H "Authorization: Bearer <JWT_TOKEN>" http://localhost:${PORT}/api/user`);
+});

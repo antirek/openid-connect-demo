@@ -1,0 +1,33 @@
+{
+  "name": "openid-connect-demo",
+  "version": "1.0.0",
+  "description": "OpenID Connect demo with oidc-provider using npm workspaces",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "start:provider": "npm run start --workspace=@demo/provider",
+    "start:client": "npm run start --workspace=@demo/client",
+    "start:admin-backend": "npm run start --workspace=@demo/admin-backend",
+    "start:admin-ui": "npm run dev --workspace=@demo/admin-ui",
+    "start:all": "concurrently \"npm run start:provider\" \"npm run start:client\" \"npm run start:admin-backend\" \"npm run start:admin-ui\"",
+    "dev:provider": "npm run dev --workspace=@demo/provider",
+    "dev:client": "npm run dev --workspace=@demo/client",
+    "dev:admin-backend": "npm run dev --workspace=@demo/admin-backend",
+    "dev:admin-ui": "npm run dev --workspace=@demo/admin-ui",
+    "dev:all": "concurrently \"npm run dev:provider\" \"npm run dev:client\" \"npm run dev:admin-backend\" \"npm run dev:admin-ui\"",
+    "install:all": "npm install"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "keywords": [
+    "openid-connect",
+    "oidc",
+    "oidc-provider",
+    "demo"
+  ],
+  "author": "",
+  "license": "MIT"
+}

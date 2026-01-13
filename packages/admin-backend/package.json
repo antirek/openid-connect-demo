@@ -1,0 +1,15 @@
+{
+  "name": "@demo/admin-backend",
+  "version": "1.0.0",
+  "description": "Admin Backend API with JWT validation middleware",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "openid-client": "^5.6.5"
+  }
+}
