@@ -175,7 +175,7 @@ async function checkAuth() {
   }
 }
 
-// Login - redirect to provider
+// Login - redirect to auth service
 function login() {
   redirectToAuth();
 }

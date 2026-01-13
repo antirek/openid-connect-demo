@@ -7,14 +7,14 @@
     "packages/*"
   ],
   "scripts": {
-    "start:provider": "npm run start --workspace=@demo/provider",
+    "start:auth-service": "npm run start --workspace=@demo/auth-service",
     "start:admin-backend": "npm run start --workspace=@demo/admin-backend",
     "build:admin-ui": "npm run build --workspace=@demo/admin-ui",
-    "start:all": "npm run build:admin-ui && concurrently \"npm run start:provider\" \"npm run start:admin-backend\"",
-    "dev:provider": "npm run dev --workspace=@demo/provider",
+    "start:all": "npm run build:admin-ui && concurrently \"npm run start:auth-service\" \"npm run start:admin-backend\"",
+    "dev:auth-service": "npm run dev --workspace=@demo/auth-service",
     "dev:admin-backend": "npm run dev --workspace=@demo/admin-backend",
     "dev:admin-ui": "npm run dev --workspace=@demo/admin-ui",
-    "dev:all": "concurrently \"npm run dev:provider\" \"npm run dev:admin-backend\" \"npm run dev:admin-ui\"",
+    "dev:all": "concurrently \"npm run dev:auth-service\" \"npm run dev:admin-backend\" \"npm run dev:admin-ui\"",
     "install:all": "npm install"
   },
   "devDependencies": {

@@ -6,7 +6,7 @@
 
 Проект состоит из трех компонентов:
 
-- **`packages/provider`** - OIDC Provider + Client (объединенный сервер)
+- **`packages/auth-service`** - OIDC Auth Service (Provider + Client, объединенный сервер)
   - OIDC Provider (авторизационный сервер):
     - Список пользователей
     - Список приложений (clients)
@@ -54,8 +54,8 @@ npm run dev:all
 ### Запуск отдельных сервисов
 
 ```bash
-# Provider + Client (порт 3000) - объединенный сервер
-npm run start:provider
+# Auth Service (порт 3000) - OIDC Provider + Client (объединенный сервер)
+npm run start:auth-service
 
 # Admin Backend (порт 3002) - включает Admin UI после билда
 npm run build:admin-ui  # Сначала собрать admin-ui в admin-backend/public
@@ -102,7 +102,7 @@ const userAppRoles = {
 
 ## URL переадресации после логина
 
-Каждое приложение может иметь свой URL для переадресации после успешного логина. Настроено в `packages/provider/index.js`:
+Каждое приложение может иметь свой URL для переадресации после успешного логина. Настроено в `packages/auth-service/index.js`:
 
 ```javascript
 const applications = [
@@ -146,16 +146,15 @@ curl -H "Authorization: Bearer <JWT_TOKEN>" http://localhost:3002/api/data
 
 ## Flow аутентификации
 
-1. Приложение (например, Admin UI) редиректит пользователя на **Provider** через `/client/auth?client_id=...`
-2. **Provider** (OIDC Client часть) инициирует OIDC flow и редиректит на **Provider** (OIDC Provider часть) для логина
-3. **Provider** показывает форму логина
-4. После успешного логина **Provider**:
+1. Приложение (например, Admin UI) редиректит пользователя на **Auth Service** через `/client/auth?client_id=...`
+2. **Auth Service** (OIDC Client часть) инициирует OIDC flow и редиректит на **Auth Service** (OIDC Provider часть) для логина
+3. **Auth Service** показывает форму логина
+4. После успешного логина **Auth Service**:
    - Проверяет маппинг пользователь -> приложение -> роль
    - Если пользователь имеет доступ к приложению, создает JWT с ролью
-   - Редиректит обратно в **Provider** (Client часть) на `/client/callback` с authorization code
-5. **Provider** (Client часть) обменивает code на JWT токен
-6. **Provider** сохраняет JWT токен и редиректит на `redirect_url` приложения с session ID
-7. Приложение получает токен через `/api/token?session=...` (на том же Provider сервере)
+   - Редиректит обратно в **Auth Service** (Client часть) на `/client/callback` с authorization code
+5. **Auth Service** (Client часть) обменивает code на JWT токен
+6. **Auth Service** редиректит на `redirect_url` приложения с токеном в query параметре
 8. Все запросы к **Admin Backend** идут с JWT в заголовке `Authorization: Bearer <token>`
 9. **Admin Backend** валидирует JWT через middleware:
    - Проверяет подпись
@@ -168,7 +167,7 @@ curl -H "Authorization: Bearer <JWT_TOKEN>" http://localhost:3002/api/data
 
 - **Нет экрана согласия (consent)** - доступ определяется маппингом ролей
 - **Роль в JWT** - каждый JWT содержит роль пользователя для конкретного приложения
-- **Stateless валидация** - admin-backend валидирует JWT без обращения к provider
+- **Stateless валидация** - admin-backend валидирует JWT без обращения к auth-service
 - **Проверка ролей** - middleware может проверять роли для доступа к endpoints
 
 ## Технологии
