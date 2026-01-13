@@ -93,7 +93,6 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue';
 import { api } from './api';
-import { handleCallback } from './callback';
 import { handleTokenFromQuery, redirectToAuth } from './auth';
 
 const user = ref(null);
@@ -115,88 +114,68 @@ const newData = ref({
 
 const isAuthenticated = computed(() => !!user.value);
 
-// Check authentication on mount
-onMounted(async () => {
-  // Сначала проверяем, есть ли токен в query параметрах (после авторизации)
+// Инициализация: обработка токена из query параметров
+async function initializeAuth() {
   const urlParams = new URLSearchParams(window.location.search);
   const tokenInQuery = urlParams.get('token');
   
-  if (tokenInQuery) {
-    console.log('App: Token found in query, processing...');
-    // Токен в query - сохраняем и очищаем URL
-    const tokenResult = handleTokenFromQuery();
-    if (tokenResult.success) {
-      console.log('App: Token saved, waiting before auth check...');
-      // Увеличиваем задержку для гарантии сохранения токена и очистки URL
-      await new Promise(resolve => setTimeout(resolve, 200));
-      
-      // Проверяем, что токен действительно сохранен
-      const savedToken = localStorage.getItem('jwt_token');
-      if (!savedToken) {
-        console.error('App: Token was not saved!');
-        return;
-      }
-      
-      console.log('App: Token confirmed saved, checking auth...');
-      // Проверяем авторизацию
-      try {
-        await checkAuth();
-        if (isAuthenticated.value) {
-          console.log('App: Auth successful, fetching data...');
-          fetchUserInfo();
-          fetchProtectedData();
-        } else {
-          console.log('App: Auth check completed but user not authenticated');
-        }
-      } catch (err) {
-        console.error('App: Auth check failed after token from query:', {
-          error: err.message,
-          response: err.response?.data,
-          status: err.response?.status,
-        });
-        // Если проверка не удалась, не редиректим снова - токен уже сохранен
-        // Interceptor обработает 401 при следующем запросе, если токен невалидный
-      }
-    } else {
-      console.error('App: Failed to save token from query:', tokenResult.error);
-    }
+  if (!tokenInQuery) {
     return;
   }
   
-  // Если нет токена в query, проверяем callback (может быть старый формат)
-  // Но сейчас provider всегда передает token напрямую
-  const callbackResult = await handleCallback();
-  if (callbackResult?.success) {
-    // Небольшая задержка для гарантии сохранения токена
-    await new Promise(resolve => setTimeout(resolve, 100));
+  console.log('App: Token found in query, processing...');
+  const tokenResult = handleTokenFromQuery();
+  
+  if (!tokenResult.success) {
+    console.error('App: Failed to save token from query:', tokenResult.error);
+    return;
+  }
+  
+  // Задержка для гарантии сохранения токена
+  await new Promise(resolve => setTimeout(resolve, 200));
+  
+  // Проверяем, что токен действительно сохранен
+  const savedToken = localStorage.getItem('jwt_token');
+  if (!savedToken) {
+    console.error('App: Token was not saved!');
+    return;
+  }
+  
+  console.log('App: Token confirmed saved');
+}
+
+// Проверка авторизации и загрузка данных пользователя
+async function verifyAndLoadUser() {
+  const token = localStorage.getItem('jwt_token');
+  if (!token) {
+    return;
+  }
+  
+  try {
+    console.log('App: Checking authentication...');
+    await checkAuth();
     
-    // Token stored, now check auth
-    try {
-      await checkAuth();
-      if (isAuthenticated.value) {
-        fetchUserInfo();
-        fetchProtectedData();
-      }
-    } catch (err) {
-      console.error('Auth check failed after callback:', err);
+    if (isAuthenticated.value) {
+      console.log('App: Auth successful, loading user data...');
+      fetchUserInfo();
+      fetchProtectedData();
+    } else {
+      console.log('App: Auth check completed but user not authenticated');
     }
-    return;
+  } catch (err) {
+    console.error('App: Auth check failed:', {
+      error: err.message,
+      response: err.response?.data,
+      status: err.response?.status,
+    });
+    // Токен невалидный - interceptor обработает 401 при следующем запросе
   }
-  
-  // Если нет callback параметров, проверяем существующий токен
-  const existingToken = localStorage.getItem('jwt_token');
-  if (existingToken) {
-    try {
-      await checkAuth();
-      if (isAuthenticated.value) {
-        fetchUserInfo();
-        fetchProtectedData();
-      }
-    } catch (err) {
-      console.error('Auth check failed with existing token:', err);
-      // Токен невалидный - будет редирект через interceptor при следующем запросе
-    }
-  }
+}
+
+// Check authentication on mount
+onMounted(async () => {
+  await initializeAuth();
+  await verifyAndLoadUser();
 });
 
 // Check if user is authenticated
