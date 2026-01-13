@@ -93,7 +93,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue';
 import { api } from './ApiClient/api';
-import { handleTokenFromQuery, redirectToAuth, removeToken } from './auth';
+import { handleTokenFromQuery, redirectToAuth, removeToken, getToken } from './auth';
 
 const user = ref(null);
 const error = ref(null);

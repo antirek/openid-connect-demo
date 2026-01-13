@@ -149,7 +149,40 @@ app.use(express.urlencoded({ extended: true }));
 // Обработка взаимодействий (только логин, без consent)
 app.use('/interaction/:uid', async (req, res, next) => {
   try {
-    const details = await provider.interactionDetails(req, res);
+    let details;
+    try {
+      details = await provider.interactionDetails(req, res);
+    } catch (err) {
+      // Если interaction не найден или истек, возвращаем ошибку
+      if (err.name === 'SessionNotFound' || err.message?.includes('invalid_request') || err.code === 'invalid_request') {
+        console.log('Interaction session not found or expired:', {
+          uid: req.params.uid,
+          error: err.name || err.code,
+          message: err.message,
+        });
+        return res.status(400).send(`
+          <html>
+            <head>
+              <title>Session Expired</title>
+              <style>
+                body { font-family: Arial, sans-serif; max-width: 400px; margin: 100px auto; padding: 20px; }
+                a { color: #007bff; text-decoration: none; }
+                a:hover { text-decoration: underline; }
+              </style>
+            </head>
+            <body>
+              <h1>Session Expired</h1>
+              <p>The authentication session has expired or is invalid. Please try again.</p>
+              <p><a href="/">Go to home</a></p>
+            </body>
+          </html>
+        `);
+      }
+      // Для других ошибок логируем и пробрасываем дальше
+      console.error('Error in interaction handler:', err);
+      throw err;
+    }
+    
     const { uid, prompt, params, session } = details;
     
     if (prompt.name === 'login') {
