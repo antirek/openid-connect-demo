@@ -122,23 +122,43 @@ onMounted(async () => {
   const tokenInQuery = urlParams.get('token');
   
   if (tokenInQuery) {
+    console.log('App: Token found in query, processing...');
     // Токен в query - сохраняем и очищаем URL
     const tokenResult = handleTokenFromQuery();
     if (tokenResult.success) {
-      // Небольшая задержка для гарантии сохранения токена
-      await new Promise(resolve => setTimeout(resolve, 100));
+      console.log('App: Token saved, waiting before auth check...');
+      // Увеличиваем задержку для гарантии сохранения токена и очистки URL
+      await new Promise(resolve => setTimeout(resolve, 200));
       
+      // Проверяем, что токен действительно сохранен
+      const savedToken = localStorage.getItem('jwt_token');
+      if (!savedToken) {
+        console.error('App: Token was not saved!');
+        return;
+      }
+      
+      console.log('App: Token confirmed saved, checking auth...');
       // Проверяем авторизацию
       try {
         await checkAuth();
         if (isAuthenticated.value) {
+          console.log('App: Auth successful, fetching data...');
           fetchUserInfo();
           fetchProtectedData();
+        } else {
+          console.log('App: Auth check completed but user not authenticated');
         }
       } catch (err) {
-        console.error('Auth check failed after token from query:', err);
+        console.error('App: Auth check failed after token from query:', {
+          error: err.message,
+          response: err.response?.data,
+          status: err.response?.status,
+        });
         // Если проверка не удалась, не редиректим снова - токен уже сохранен
+        // Interceptor обработает 401 при следующем запросе, если токен невалидный
       }
+    } else {
+      console.error('App: Failed to save token from query:', tokenResult.error);
     }
     return;
   }
@@ -185,18 +205,31 @@ onMounted(async () => {
 async function checkAuth() {
   const token = localStorage.getItem('jwt_token');
   if (!token) {
+    console.log('checkAuth: No token in localStorage');
     user.value = null;
     return;
   }
   
+  console.log('checkAuth: Token found, making API request', {
+    tokenLength: token.length,
+    tokenStart: token.substring(0, 20) + '...',
+  });
+  
   try {
     const data = await api.get('/user');
+    console.log('checkAuth: Success, user authenticated', data.user);
     user.value = data.user;
   } catch (err) {
-    console.error('Auth check failed:', err);
+    console.error('Auth check failed:', {
+      status: err.response?.status,
+      statusText: err.response?.statusText,
+      error: err.response?.data,
+      message: err.message,
+    });
     // Не удаляем токен здесь - пусть interceptor обработает 401
     // Если это не 401, то токен может быть валидным, просто ошибка запроса
     if (err.response?.status === 401) {
+      console.log('checkAuth: 401 received, removing token');
       localStorage.removeItem('jwt_token');
       user.value = null;
     }

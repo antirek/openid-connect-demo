@@ -26,7 +26,10 @@ export function handleTokenFromQuery() {
   const token = urlParams.get('token');
   
   if (token) {
-    console.log('Token received from query, saving to localStorage');
+    console.log('Token received from query, saving to localStorage', {
+      tokenLength: token.length,
+      tokenStart: token.substring(0, 20) + '...',
+    });
     
     // Сохраняем токен
     localStorage.setItem('jwt_token', token);
@@ -34,9 +37,16 @@ export function handleTokenFromQuery() {
     // Проверяем, что токен действительно сохранен
     const savedToken = localStorage.getItem('jwt_token');
     if (savedToken !== token) {
-      console.error('Token was not saved correctly!');
+      console.error('Token was not saved correctly!', {
+        originalLength: token.length,
+        savedLength: savedToken?.length,
+      });
       return { success: false, error: 'Token save failed' };
     }
+    
+    console.log('Token saved successfully to localStorage', {
+      savedLength: savedToken.length,
+    });
     
     // Очищаем URL от токена
     const returnUrl = sessionStorage.getItem('return_url') || '/';
@@ -46,7 +56,7 @@ export function handleTokenFromQuery() {
     const cleanUrl = returnUrl.split('?')[0];
     window.history.replaceState({}, document.title, cleanUrl);
     
-    console.log('Token saved successfully, URL cleaned');
+    console.log('URL cleaned, ready for API calls');
     return { success: true, token };
   }
   

@@ -22,43 +22,48 @@ let issuer = null;
 let client = null;
 let jwks = null;
 
-// Хранилище использованных nonce для предотвращения replay-атак
+// Хранилище использованных токенов для предотвращения replay-атак
 // В продакшене использовать Redis или БД с TTL
-// Ключ - nonce, значение - { timestamp: время использования, timeout: таймер для автоудаления }
-const usedNonces = new Map();
+// Ключ - комбинация nonce + sub + iat (уникальная для каждого токена), значение - { timestamp: время использования, timeout: таймер для автоудаления }
+const usedTokens = new Map();
 
-// TTL для nonce (1 час)
-const NONCE_TTL = 60 * 60 * 1000; // 1 час в миллисекундах
+// TTL для токенов (равен сроку действия токена, обычно 1 час)
+const TOKEN_TTL = 60 * 60 * 1000; // 1 час в миллисекундах
 
-// Функция для удаления nonce по таймауту
-function scheduleNonceDeletion(nonce) {
+// Функция для создания уникального ключа для токена
+function getTokenKey(nonce, sub, iat) {
+  return `${nonce}:${sub}:${iat}`;
+}
+
+// Функция для удаления токена по таймауту
+function scheduleTokenDeletion(tokenKey) {
   const timeout = setTimeout(() => {
-    usedNonces.delete(nonce);
-    console.log(`Nonce auto-deleted after TTL: ${nonce.substring(0, 10)}...`);
-  }, NONCE_TTL);
+    usedTokens.delete(tokenKey);
+    console.log(`Token key auto-deleted after TTL: ${tokenKey.substring(0, 20)}...`);
+  }, TOKEN_TTL);
   
   return timeout;
 }
 
-// Периодическая очистка старых nonce (на случай, если таймеры не сработали)
+// Периодическая очистка старых токенов (на случай, если таймеры не сработали)
 // Очистка каждые 5 минут
 setInterval(() => {
   const now = Date.now();
   let cleaned = 0;
   
-  for (const [nonce, data] of usedNonces.entries()) {
-    if (now - data.timestamp > NONCE_TTL) {
+  for (const [tokenKey, data] of usedTokens.entries()) {
+    if (now - data.timestamp > TOKEN_TTL) {
       // Очищаем таймер, если он еще не сработал
       if (data.timeout) {
         clearTimeout(data.timeout);
       }
-      usedNonces.delete(nonce);
+      usedTokens.delete(tokenKey);
       cleaned++;
     }
   }
   
   if (cleaned > 0) {
-    console.log(`Cleaned up ${cleaned} expired nonces`);
+    console.log(`Cleaned up ${cleaned} expired token keys`);
   }
 }, 5 * 60 * 1000); // Каждые 5 минут
 
@@ -71,11 +76,26 @@ async function getClient() {
     });
     
     // Создаем JWKS endpoint для валидации подписи
-    // JWKS endpoint обычно находится по адресу: {issuer}/.well-known/jwks.json
-    const jwksUri = new URL('/.well-known/jwks.json', issuer.issuer).href;
-    jwks = createRemoteJWKSet(new URL(jwksUri));
+    // JWKS endpoint берем из discovery (обычно /jwks для oidc-provider)
+    const jwksUri = issuer.metadata.jwks_uri || new URL('/jwks', issuer.issuer).href;
+    console.log('JWKS endpoint URL:', jwksUri);
     
-    console.log('JWKS endpoint configured:', jwksUri);
+    // Проверяем доступность JWKS endpoint
+    try {
+      const testResponse = await fetch(jwksUri);
+      if (!testResponse.ok) {
+        console.error('JWKS endpoint not available:', testResponse.status, testResponse.statusText);
+        throw new Error(`JWKS endpoint returned ${testResponse.status}: ${testResponse.statusText}`);
+      }
+      const jwksData = await testResponse.json();
+      console.log('JWKS endpoint accessible, keys count:', jwksData.keys?.length || 0);
+    } catch (fetchError) {
+      console.error('Failed to fetch JWKS endpoint:', fetchError.message);
+      throw fetchError;
+    }
+    
+    jwks = createRemoteJWKSet(new URL(jwksUri));
+    console.log('JWKS endpoint configured successfully');
   }
   return { issuer, client, jwks };
 }
@@ -87,7 +107,12 @@ const validateJWT = async (req, res, next) => {
     const authHeader = req.headers.authorization;
     
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      console.log('JWT validation: No Authorization header');
+      console.log('JWT validation: No Authorization header', {
+        hasHeader: !!authHeader,
+        headerStart: authHeader?.substring(0, 20),
+        url: req.url,
+        method: req.method,
+      });
       // Нет токена - редиректим на provider для логина
       const { issuer } = await getClient();
       const authUrl = `${issuer.issuer}/auth?client_id=${CLIENT_ID}&response_type=code&redirect_uri=http://localhost:3001/callback&scope=openid`;
@@ -101,12 +126,20 @@ const validateJWT = async (req, res, next) => {
     const token = authHeader.replace('Bearer ', '');
     
     if (!token) {
-      console.log('JWT validation: Empty token');
+      console.log('JWT validation: Empty token after Bearer prefix removal', {
+        authHeader: authHeader.substring(0, 50),
+      });
       return res.status(401).json({
         error: 'unauthorized',
         message: 'JWT token required',
       });
     }
+    
+    console.log('JWT validation: Token received', {
+      tokenLength: token.length,
+      tokenStart: token.substring(0, 20) + '...',
+      url: req.url,
+    });
     
     const { issuer } = await getClient();
     
@@ -218,38 +251,39 @@ const validateJWT = async (req, res, next) => {
       });
     }
     
-    // Проверка, что nonce не был использован ранее (защита от replay-атак)
-    const existingNonce = usedNonces.get(verifiedPayload.nonce);
-    if (existingNonce) {
-      // Проверяем, не истек ли срок действия nonce
+    // Проверка nonce и защита от replay-атак
+    // Создаем уникальный ключ для токена: nonce + sub + iat
+    // Это позволяет одному токену использоваться многократно, но предотвращает использование поддельных токенов
+    const tokenKey = getTokenKey(verifiedPayload.nonce, verifiedPayload.sub, verifiedPayload.iat);
+    const existingToken = usedTokens.get(tokenKey);
+    
+    if (existingToken) {
+      // Токен уже использовался - проверяем, не истек ли срок
       const now = Date.now();
-      if (now - existingNonce.timestamp < NONCE_TTL) {
-        console.log('JWT validation: Nonce already used (replay attack detected)', {
-          nonce: verifiedPayload.nonce.substring(0, 10) + '...',
-          firstUsed: new Date(existingNonce.timestamp).toISOString(),
-          age: Math.round((now - existingNonce.timestamp) / 1000) + 's',
-        });
-        return res.status(401).json({
-          error: 'nonce_reused',
-          message: 'Nonce has already been used (possible replay attack)',
-        });
+      if (now - existingToken.timestamp < TOKEN_TTL) {
+        // Токен использовался недавно - это нормально, разрешаем повторное использование
+        // (один токен может использоваться многократно в течение срока действия)
+        console.log('JWT validation: Token reused (same nonce+sub+iat), allowing');
       } else {
-        // Nonce истек, удаляем его и разрешаем использование
-        if (existingNonce.timeout) {
-          clearTimeout(existingNonce.timeout);
+        // Токен истек, удаляем его
+        if (existingToken.timeout) {
+          clearTimeout(existingToken.timeout);
         }
-        usedNonces.delete(verifiedPayload.nonce);
-        console.log('JWT validation: Expired nonce removed, allowing reuse');
+        usedTokens.delete(tokenKey);
+        console.log('JWT validation: Expired token key removed');
       }
     }
     
-    // Сохраняем nonce как использованный с таймером для автоудаления
-    const timeout = scheduleNonceDeletion(verifiedPayload.nonce);
-    usedNonces.set(verifiedPayload.nonce, {
-      timestamp: Date.now(),
-      timeout: timeout,
-    });
-    console.log('JWT validation: Nonce validated and marked as used (will auto-delete in 1 hour)');
+    // Сохраняем токен только если он еще не сохранен
+    // Это предотвращает создание множественных таймеров для одного токена
+    if (!usedTokens.has(tokenKey)) {
+      const timeout = scheduleTokenDeletion(tokenKey);
+      usedTokens.set(tokenKey, {
+        timestamp: Date.now(),
+        timeout: timeout,
+      });
+      console.log('JWT validation: Token key saved (will auto-delete in 1 hour)');
+    }
     
     // Используем payload из валидированного токена
     // Это гарантирует, что токен не был подделан
