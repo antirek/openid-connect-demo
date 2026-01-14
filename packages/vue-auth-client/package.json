@@ -1,0 +1,24 @@
+{
+  "name": "@demo/vue-auth-client",
+  "version": "1.0.0",
+  "description": "Vue 3 authentication client plugin with OIDC support",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "keywords": [
+    "vue",
+    "vue3",
+    "authentication",
+    "auth",
+    "oidc",
+    "jwt",
+    "plugin"
+  ],
+  "peerDependencies": {
+    "vue": "^3.0.0",
+    "axios": "^1.0.0"
+  },
+  "dependencies": {}
+}

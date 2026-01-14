@@ -2,11 +2,11 @@
   <div id="app">
     <header class="header">
       <h1>Admin UI - OIDC Demo</h1>
-      <div class="user-info" v-if="user">
+      <div class="user-info" v-if="currentUser">
         <span>
-          <strong>{{ user.name || user.sub }}</strong>
-          <span class="badge" :class="`badge-${user.role}`" style="margin-left: 10px;">
-            {{ user.role || 'N/A' }}
+          <strong>{{ currentUser.name || currentUser.sub }}</strong>
+          <span class="badge" :class="`badge-${currentUser.role}`" style="margin-left: 10px;">
+            {{ currentUser.role || 'N/A' }}
           </span>
         </span>
         <button class="btn btn-danger" @click="logout">Logout</button>
@@ -45,7 +45,7 @@
         </div>
 
         <!-- Admin Only Card -->
-        <div class="card" v-if="user?.role === 'admin'">
+        <div class="card" v-if="currentUser?.role === 'admin'">
           <h2>Admin Endpoint</h2>
           <div v-if="adminLoading" class="loading">Loading...</div>
           <div v-else-if="adminData" class="data-display">
@@ -91,11 +91,22 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, watch } from 'vue';
+import { useAuth } from '@demo/vue-auth-client';
 import { api } from './ApiClient/api';
-import { handleTokenFromQuery, redirectToAuth, removeToken, getToken, loadAuthConfig } from './auth';
 
-const user = ref(null);
+// Используем auth из плагина
+const {
+  currentUser,
+  isAuthenticated,
+  isLoadingConfig,
+  isVerifyingAuth,
+  login,
+  logout: authLogout,
+  verifyAuth,
+  handleTokenFromQuery,
+} = useAuth();
+
 const error = ref(null);
 const success = ref(null);
 const loading = ref(false);
@@ -112,93 +123,39 @@ const newData = ref({
   description: '',
 });
 
-const isAuthenticated = computed(() => !!user.value);
-
-// Инициализация: обработка токена из query параметров
-async function initializeAuth() {
-  const tokenResult = handleTokenFromQuery();
-  
-  if (!tokenResult.success) {
-    return;
+// Инициализация приложения
+onMounted(async () => {
+  // Ждем загрузки конфигурации (если еще загружается)
+  if (isLoadingConfig.value) {
+    await new Promise((resolve) => {
+      const unwatch = watch(isLoadingConfig, (loading) => {
+        if (!loading) {
+          unwatch();
+          resolve();
+        }
+      });
+    });
   }
   
-  // Задержка для гарантии сохранения токена
-  await new Promise(resolve => setTimeout(resolve, 200));
-}
-
-// Проверка авторизации и загрузка данных пользователя
-async function verifyAndLoadUser() {
+  // Обрабатываем токен из query параметров (если есть)
+  handleTokenFromQuery();
+  
+  // Проверяем авторизацию
   try {
-    console.log('App: Checking authentication...');
-    const authenticated = await checkAuth();
-    
-    if (authenticated) {
-      console.log('App: Auth successful, loading protected data...');
-      // checkAuth() уже загрузил данные пользователя, загружаем только защищенные данные
+    await verifyAuth();
+    if (isAuthenticated.value) {
+      // Загружаем защищенные данные
       fetchProtectedData();
-    } else {
-      console.log('App: Auth check completed but user not authenticated');
     }
   } catch (err) {
-    console.error('App: Auth check failed:', {
-      error: err.message,
-      response: err.response?.data,
-      status: err.response?.status,
-    });
-    // Токен невалидный - interceptor обработает 401 при следующем запросе
-  }
-}
-
-// Инициализация приложения: загрузка конфигурации и проверка авторизации
-onMounted(async () => {
-  // Загружаем конфигурацию авторизации с бэкенда
-  // При первой загрузке или если кэш истек, будет отправлен запрос
-  // Если конфигурация уже в кэше, запрос не будет отправлен (это нормально)
-  try {
-    console.log('App: Starting auth config load...');
-    const config = await loadAuthConfig();
-    console.log('App: Auth config ready:', config);
-  } catch (err) {
-    console.error('App: Failed to load auth config:', err);
-    // Продолжаем работу с fallback конфигурацией
-  }
-  
-  // Обрабатываем токен из query параметров
-  await initializeAuth();
-  
-  // Проверяем авторизацию и загружаем данные пользователя
-  await verifyAndLoadUser();
-});
-
-// Check if user is authenticated
-async function checkAuth() {
-  if (!getToken()) {
-    // Нет токена = не авторизован (у нас нет сессий)
-    user.value = null;
-    return false;
-  }
-  
-  try {
-    const data = await api.get('/user');
-    user.value = data.user;
-    return true;
-  } catch (err) {
+    console.error('App: Auth verification failed:', err);
     // Interceptor обработает 401 и сделает редирект
-    // Здесь просто очищаем user и пробрасываем ошибку
-    user.value = null;
-    throw err;
   }
-}
-
-// Login - redirect to auth service
-function login() {
-  redirectToAuth();
-}
+});
 
 // Logout
 function logout() {
-  removeToken();
-  user.value = null;
+  authLogout();
   userData.value = null;
   adminData.value = null;
   protectedData.value = null;
@@ -215,7 +172,7 @@ async function fetchUserInfo() {
   error.value = null;
   try {
     userData.value = await api.get('/user');
-    user.value = userData.value.user;
+    // currentUser обновляется автоматически через verifyAuth
   } catch (err) {
     error.value = err.response?.data?.message || err.message || 'Failed to fetch user info';
     if (err.response?.status === 401) {
