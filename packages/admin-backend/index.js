@@ -1,7 +1,7 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { createJWTMiddleware } from './middleware/jwt.js';
+import { createJWTMiddleware } from '@demo/jwt-middleware';
 
 const PORT = process.env.PORT || 3002;
 const PROVIDER_URL = process.env.PROVIDER_URL || 'http://localhost:3000';

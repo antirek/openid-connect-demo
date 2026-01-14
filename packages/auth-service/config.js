@@ -17,10 +17,10 @@ export const applications = [
     redirect_url: 'http://localhost:3002/', // URL для переадресации после успешного логина
   },
   { 
-    client_id: 'app2', 
+    client_id: 'filebump-admin', 
     name: 'Application 2', 
     secret: 'app2-secret',
-    redirect_url: 'http://localhost:3001/', // URL для переадресации после успешного логина
+    redirect_url: 'http://localhost:33033/', // URL для переадресации после успешного логина
   },
   { 
     client_id: 'admin-ui', 
@@ -47,6 +47,7 @@ export const userAppRoles = {
     'demo-client': 'admin',
     'app2': 'admin',
     'admin-ui': 'admin',
+    'filebump-admin': 'admin',
   },
 };
 

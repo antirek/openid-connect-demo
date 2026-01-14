@@ -1,0 +1,25 @@
+{
+  "name": "@demo/jwt-middleware",
+  "version": "1.0.0",
+  "description": "JWT validation middleware for Express.js with OIDC support",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "keywords": [
+    "jwt",
+    "middleware",
+    "express",
+    "oidc",
+    "authentication",
+    "authorization"
+  ],
+  "dependencies": {
+    "openid-client": "^5.6.5",
+    "jose": "^5.2.0"
+  },
+  "peerDependencies": {
+    "express": "^4.18.0"
+  }
+}

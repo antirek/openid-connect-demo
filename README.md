@@ -6,7 +6,13 @@
 
 ## Архитектура
 
-Проект состоит из трех компонентов:
+Проект состоит из четырех компонентов:
+
+- **`packages/jwt-middleware`** - Переиспользуемый JWT validation middleware для Express.js
+  - Валидация JWT токенов через JWKS
+  - Защита от replay-атак
+  - Проверка ролей пользователей
+  - Может использоваться в любых Express.js приложениях
 
 - **`packages/auth-service`** - OIDC Auth Service (Provider + Client, объединенный сервер)
   - OIDC Provider (авторизационный сервер):
@@ -22,7 +28,7 @@
     - Endpoint `/client/callback` для обработки callback
 
 - **`packages/admin-backend`** - Admin Backend API с JWT валидацией
-  - Middleware для валидации JWT токенов
+  - Использует `@demo/jwt-middleware` для валидации JWT токенов
   - Проверка ролей пользователей
   - Защищенные endpoints
   - Endpoint `/api/config` для предоставления конфигурации авторизации клиентам
