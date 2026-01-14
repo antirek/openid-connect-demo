@@ -1,5 +1,5 @@
 {
-  "name": "@demo/jwt-middleware",
+  "name": "stork-jwt-middleware",
   "version": "1.0.0",
   "description": "JWT validation middleware for Express.js with OIDC support",
   "type": "module",

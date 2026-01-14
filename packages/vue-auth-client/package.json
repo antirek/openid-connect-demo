@@ -1,6 +1,6 @@
 {
-  "name": "@demo/vue-auth-client",
-  "version": "1.0.0",
+  "name": "stork-vue-auth-client",
+  "version": "0.0.1",
   "description": "Vue 3 authentication client plugin with OIDC support",
   "type": "module",
   "main": "src/index.js",

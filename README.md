@@ -28,7 +28,7 @@
     - Endpoint `/client/callback` для обработки callback
 
 - **`packages/admin-backend`** - Admin Backend API с JWT валидацией
-  - Использует `@demo/jwt-middleware` для валидации JWT токенов
+  - Использует `stork-jwt-middleware` для валидации JWT токенов
   - Проверка ролей пользователей
   - Защищенные endpoints
   - Endpoint `/api/config` для предоставления конфигурации авторизации клиентам

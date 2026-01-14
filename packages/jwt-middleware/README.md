@@ -1,4 +1,4 @@
-# @demo/jwt-middleware
+# stork-jwt-middleware
 
 JWT validation middleware для Express.js с поддержкой OIDC (OpenID Connect).
 
@@ -15,7 +15,7 @@ JWT validation middleware для Express.js с поддержкой OIDC (OpenID
 ## Установка
 
 ```bash
-npm install @demo/jwt-middleware
+npm install stork-jwt-middleware
 ```
 
 ## Использование
@@ -24,7 +24,7 @@ npm install @demo/jwt-middleware
 
 ```javascript
 import express from 'express';
-import { createJWTMiddleware } from '@demo/jwt-middleware';
+import { createJWTMiddleware } from 'stork-jwt-middleware';
 
 const app = express();
 
@@ -157,7 +157,7 @@ Middleware отслеживает использованные токены по
 
 ```javascript
 import express from 'express';
-import { createJWTMiddleware } from '@demo/jwt-middleware';
+import { createJWTMiddleware } from 'stork-jwt-middleware';
 
 const app = express();
 app.use(express.json());

@@ -1,5 +1,5 @@
 import { createApp } from 'vue';
-import { createAuthPlugin } from '@demo/vue-auth-client';
+import { createAuthPlugin } from 'stork-vue-auth-client';
 import App from './App.vue';
 import './style.css';
 import { apiClient } from './apiClient.js';

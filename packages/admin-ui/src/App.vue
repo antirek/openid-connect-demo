@@ -92,7 +92,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue';
-import { useAuth } from '@demo/vue-auth-client';
+import { useAuth } from 'stork-vue-auth-client';
 import { apiClient } from './apiClient.js';
 
 // Используем auth из плагина

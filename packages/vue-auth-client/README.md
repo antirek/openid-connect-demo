@@ -1,4 +1,4 @@
-# @demo/vue-auth-client
+# stork-vue-auth-client
 
 Vue 3 authentication client plugin с поддержкой OIDC (OpenID Connect).
 
@@ -14,7 +14,7 @@ Vue 3 Plugin для управления авторизацией в прило�
 ## Установка
 
 ```bash
-npm install @demo/vue-auth-client
+npm install stork-vue-auth-client
 ```
 
 ## Использование
@@ -24,7 +24,7 @@ npm install @demo/vue-auth-client
 ```javascript
 // main.js
 import { createApp } from 'vue';
-import { createAuthPlugin } from '@demo/vue-auth-client';
+import { createAuthPlugin } from 'stork-vue-auth-client';
 import axios from 'axios';
 import App from './App.vue';
 
@@ -47,7 +47,7 @@ app.mount('#app');
 ```vue
 <script setup>
 import { onMounted } from 'vue';
-import { useAuth } from '@demo/vue-auth-client';
+import { useAuth } from 'stork-vue-auth-client';
 import { api } from './api';
 
 const { 

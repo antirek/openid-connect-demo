@@ -59,7 +59,7 @@ packages/vue-auth-client/
 ```javascript
 // main.js
 import { createApp } from 'vue';
-import { createAuthPlugin } from '@demo/vue-auth-client';
+import { createAuthPlugin } from 'stork-vue-auth-client';
 import axios from 'axios';
 
 const app = createApp(App);
@@ -86,7 +86,7 @@ app.mount('#app');
 ```vue
 <!-- Component.vue -->
 <script setup>
-import { useAuth } from '@demo/vue-auth-client';
+import { useAuth } from 'stork-vue-auth-client';
 
 const { 
   user,           // ref с данными пользователя
@@ -148,7 +148,7 @@ packages/vue-auth-client/
 ```javascript
 // main.js
 import { createApp } from 'vue';
-import { setupAuth } from '@demo/vue-auth-client';
+import { setupAuth } from 'stork-vue-auth-client';
 import axios from 'axios';
 
 const app = createApp(App);
@@ -170,7 +170,7 @@ app.mount('#app');
 ```vue
 <!-- Component.vue -->
 <script setup>
-import { useAuth } from '@demo/vue-auth-client';
+import { useAuth } from 'stork-vue-auth-client';
 
 const auth = useAuth();
 // Использование как в варианте 1
@@ -430,7 +430,7 @@ interface UseAuthReturn {
 ```javascript
 // main.js
 import { createApp } from 'vue';
-import { createAuthPlugin } from '@demo/vue-auth-client';
+import { createAuthPlugin } from 'stork-vue-auth-client';
 import axios from 'axios';
 import App from './App.vue';
 
@@ -460,7 +460,7 @@ app.mount('#app');
 <!-- App.vue -->
 <script setup>
 import { onMounted } from 'vue';
-import { useAuth } from '@demo/vue-auth-client';
+import { useAuth } from 'stork-vue-auth-client';
 import { api } from './api'; // Ваш api client
 
 const { user, isAuthenticated, checkAuth, handleTokenFromQuery } = useAuth();
@@ -579,7 +579,7 @@ mkdir -p packages/vue-auth-client/src/{composables,auth,interceptors,utils}
 
 ```javascript
 // main.js
-import { createAuthPlugin } from '@demo/vue-auth-client';
+import { createAuthPlugin } from 'stork-vue-auth-client';
 
 app.use(createAuthPlugin({ ... }));
 ```
@@ -587,7 +587,7 @@ app.use(createAuthPlugin({ ... }));
 ```vue
 <!-- App.vue -->
 <script setup>
-import { useAuth } from '@demo/vue-auth-client';
+import { useAuth } from 'stork-vue-auth-client';
 
 const { user, isAuthenticated, checkAuth } = useAuth();
 </script>
@@ -623,7 +623,7 @@ interface AuthPluginOptions {
 ### 3. Middleware для Vue Router
 
 ```typescript
-import { createAuthGuard } from '@demo/vue-auth-client';
+import { createAuthGuard } from 'stork-vue-auth-client';
 
 router.beforeEach(createAuthGuard({
   requireAuth: true,

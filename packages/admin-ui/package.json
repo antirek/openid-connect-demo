@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@demo/vue-auth-client": "*",
+    "stork-vue-auth-client": "*",
     "vue": "^3.4.21",
     "axios": "^1.6.7"
   },

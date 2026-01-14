@@ -83,7 +83,7 @@ const initialize = async () => {
 ```vue
 <script setup>
 import { onMounted } from 'vue';
-import { useAuth } from '@demo/vue-auth-client';
+import { useAuth } from 'stork-vue-auth-client';
 import { apiClient } from './apiClient.js';
 
 const { initialize, isAuthenticated } = useAuth();
@@ -301,7 +301,7 @@ interface UseAuthReturn {
 ```vue
 <script setup>
 import { onMounted } from 'vue';
-import { useAuth } from '@demo/vue-auth-client';
+import { useAuth } from 'stork-vue-auth-client';
 
 const { initialize } = useAuth();
 
