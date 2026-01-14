@@ -36,6 +36,9 @@ export function useAuth() {
     // Утилиты
     handleTokenFromQuery: authInstance.handleTokenFromQuery,
     clearConfigCache: authInstance.clearConfigCache,
+    
+    // Инициализация
+    initialize: authInstance.initialize,
   };
 }
 

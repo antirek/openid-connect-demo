@@ -1,6 +1,6 @@
 // Vue 3 Plugin для авторизации
 
-import { ref } from 'vue';
+import { ref, watch } from 'vue';
 import { createTokenManager } from './auth/token.js';
 import { createConfigManager } from './auth/config.js';
 import { createRedirectManager } from './auth/redirect.js';
@@ -131,6 +131,41 @@ export function createAuthPlugin(options) {
     config.value = null;
   };
 
+  // Инициализация авторизации (ожидание конфигурации, обработка токена, проверка авторизации)
+  const initialize = async () => {
+    // Ждем загрузки конфигурации (если еще загружается)
+    if (isLoadingConfig.value) {
+      await new Promise((resolve) => {
+        const unwatch = watch(isLoadingConfig, (loading) => {
+          if (!loading) {
+            unwatch();
+            resolve();
+          }
+        });
+      });
+    }
+    
+    // Обрабатываем токен из query параметров (если есть)
+    handleTokenFromQuery();
+    
+    // Проверяем авторизацию
+    try {
+      const authenticated = await verifyAuth();
+      return { 
+        authenticated, 
+        user: currentUser.value,
+        error: null,
+      };
+    } catch (err) {
+      console.error('Auth initialization failed:', err);
+      return { 
+        authenticated: false, 
+        user: null,
+        error: err,
+      };
+    }
+  };
+
   // Настраиваем interceptors
   // Используем функции, чтобы всегда получать актуальное значение токена
   setupRequestInterceptor(apiClient, () => tokenManager.getToken());
@@ -161,6 +196,7 @@ export function createAuthPlugin(options) {
     loadConfig,
     handleTokenFromQuery,
     clearConfigCache,
+    initialize,
   };
 
   // Сохраняем экземпляр для composable

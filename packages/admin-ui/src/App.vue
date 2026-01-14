@@ -91,20 +91,17 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue';
+import { ref, onMounted } from 'vue';
 import { useAuth } from '@demo/vue-auth-client';
-import { api } from './ApiClient/api';
+import { apiClient } from './apiClient.js';
 
 // Используем auth из плагина
 const {
   currentUser,
   isAuthenticated,
-  isLoadingConfig,
-  isVerifyingAuth,
   login,
   logout: authLogout,
-  verifyAuth,
-  handleTokenFromQuery,
+  initialize,
 } = useAuth();
 
 const error = ref(null);
@@ -125,31 +122,11 @@ const newData = ref({
 
 // Инициализация приложения
 onMounted(async () => {
-  // Ждем загрузки конфигурации (если еще загружается)
-  if (isLoadingConfig.value) {
-    await new Promise((resolve) => {
-      const unwatch = watch(isLoadingConfig, (loading) => {
-        if (!loading) {
-          unwatch();
-          resolve();
-        }
-      });
-    });
-  }
+  const { authenticated } = await initialize();
   
-  // Обрабатываем токен из query параметров (если есть)
-  handleTokenFromQuery();
-  
-  // Проверяем авторизацию
-  try {
-    await verifyAuth();
-    if (isAuthenticated.value) {
-      // Загружаем защищенные данные
-      fetchProtectedData();
-    }
-  } catch (err) {
-    console.error('App: Auth verification failed:', err);
-    // Interceptor обработает 401 и сделает редирект
+  if (authenticated) {
+    // Загружаем защищенные данные
+    fetchProtectedData();
   }
 });
 
@@ -171,7 +148,7 @@ async function fetchUserInfo() {
   loading.value = true;
   error.value = null;
   try {
-    userData.value = await api.get('/user');
+    userData.value = await apiClient.get('/user');
     // currentUser обновляется автоматически через verifyAuth
   } catch (err) {
     error.value = err.response?.data?.message || err.message || 'Failed to fetch user info';
@@ -188,7 +165,7 @@ async function fetchAdminData() {
   adminLoading.value = true;
   error.value = null;
   try {
-    adminData.value = await api.get('/admin');
+    adminData.value = await apiClient.get('/admin');
     success.value = 'Admin data fetched successfully';
     setTimeout(() => {
       success.value = null;
@@ -208,7 +185,7 @@ async function fetchProtectedData() {
   dataLoading.value = true;
   error.value = null;
   try {
-    protectedData.value = await api.get('/data');
+    protectedData.value = await apiClient.get('/data');
   } catch (err) {
     error.value = err.response?.data?.message || err.message || 'Failed to fetch protected data';
     if (err.response?.status === 401) {
@@ -226,7 +203,7 @@ async function createData() {
   success.value = null;
   
   try {
-    const response = await api.post('/data', newData.value);
+    const response = await apiClient.post('/data', newData.value);
     success.value = 'Data created successfully';
     newData.value = { title: '', description: '' };
     fetchProtectedData(); // Refresh data list
