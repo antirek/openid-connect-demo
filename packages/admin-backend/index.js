@@ -28,6 +28,14 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Публичный endpoint для получения конфигурации авторизации
+app.get('/api/config', (req, res) => {
+  res.json({
+    providerUrl: PROVIDER_URL,
+    clientId: CLIENT_ID,
+  });
+});
+
 
 // Защищенный endpoint (требует JWT)
 app.get('/api/user', validateJWT, (req, res) => {
@@ -85,6 +93,7 @@ app.listen(PORT, () => {
   console.log(`Admin UI available at http://localhost:${PORT}`);
   console.log(`\nAPI Endpoints:`);
   console.log(`  GET  /api/health      - Public health check`);
+  console.log(`  GET  /api/config      - Get auth configuration (public)`);
   console.log(`  GET  /api/user        - Get user info (requires JWT)`);
   console.log(`  GET  /api/admin       - Admin only (requires JWT + admin role)`);
   console.log(`  GET  /api/data        - Protected data (requires JWT + admin/user role)`);

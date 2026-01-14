@@ -93,7 +93,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue';
 import { api } from './ApiClient/api';
-import { handleTokenFromQuery, redirectToAuth, removeToken, getToken } from './auth';
+import { handleTokenFromQuery, redirectToAuth, removeToken, getToken, loadAuthConfig } from './auth';
 
 const user = ref(null);
 const error = ref(null);
@@ -149,9 +149,24 @@ async function verifyAndLoadUser() {
   }
 }
 
-// Check authentication on mount
+// Инициализация приложения: загрузка конфигурации и проверка авторизации
 onMounted(async () => {
+  // Загружаем конфигурацию авторизации с бэкенда
+  // При первой загрузке или если кэш истек, будет отправлен запрос
+  // Если конфигурация уже в кэше, запрос не будет отправлен (это нормально)
+  try {
+    console.log('App: Starting auth config load...');
+    const config = await loadAuthConfig();
+    console.log('App: Auth config ready:', config);
+  } catch (err) {
+    console.error('App: Failed to load auth config:', err);
+    // Продолжаем работу с fallback конфигурацией
+  }
+  
+  // Обрабатываем токен из query параметров
   await initializeAuth();
+  
+  // Проверяем авторизацию и загружаем данные пользователя
   await verifyAndLoadUser();
 });
 

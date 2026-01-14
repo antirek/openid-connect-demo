@@ -26,6 +26,7 @@
 
 **Admin UI** - это Vue.js 3 приложение, которое:
 - Отображает интерфейс для работы с Admin Backend API
+- **Получает конфигурацию авторизации с Admin Backend** (не знает о провайдере напрямую)
 - Инициирует процесс авторизации через редирект на Auth Service
 - Получает JWT токен из query параметров после успешной авторизации
 - Сохраняет токен в `localStorage`
@@ -37,9 +38,11 @@
 **Admin Backend** - это Express.js API сервер, который:
 - Раздает статические файлы Admin UI
 - Предоставляет REST API endpoints (все начинаются с `/api`)
+- **Предоставляет endpoint `/api/config` для получения конфигурации авторизации** (providerUrl, clientId)
 - Валидирует JWT токены через middleware
 - Проверяет роли пользователей для доступа к защищенным ресурсам
 - Выполняет оффлайн-валидацию токенов (без обращения к Auth Service)
+- **Является единой точкой конфигурации** - все настройки авторизации задаются здесь
 
 ## Поток авторизации (Authorization Flow)
 
@@ -51,13 +54,22 @@
 User → Admin UI (localhost:3002)
 ```
 
-**Admin UI проверяет наличие токена:**
-- Если токен отсутствует в `localStorage` → редирект на Auth Service
-- Если токен есть → проверяет его валидность через API запрос
+**Admin UI при инициализации:**
+1. Загружает конфигурацию авторизации с Admin Backend:
+   ```javascript
+   // Admin UI → Admin Backend
+   GET /api/config
+   // Ответ: { providerUrl: 'http://localhost:3000', clientId: 'admin-ui' }
+   ```
+2. Кэширует конфигурацию в `sessionStorage` (TTL 5 минут)
+3. Проверяет наличие токена в `localStorage`:
+   - Если токен отсутствует → редирект на Auth Service
+   - Если токен есть → проверяет его валидность через API запрос
 
 **Редирект на Auth Service:**
 ```javascript
 // Admin UI → Auth Service
+// Использует providerUrl и clientId из конфигурации
 GET http://localhost:3000/client/auth?client_id=admin-ui
 ```
 
@@ -302,8 +314,12 @@ setToken(token)   // Сохранить токен
 removeToken()     // Удалить токен
 hasToken()        // Проверить наличие токена
 
+// Конфигурация
+loadAuthConfig()           // Загрузить конфигурацию с бэкенда
+clearAuthConfigCache()     // Очистить кэш конфигурации
+
 // Авторизация
-redirectToAuth()           // Редирект на авторизацию
+redirectToAuth()           // Редирект на авторизацию (использует конфигурацию)
 handleTokenFromQuery()     // Обработка токена из URL
 ```
 
@@ -311,6 +327,22 @@ handleTokenFromQuery()     // Обработка токена из URL
 - Единая точка контроля
 - Легко изменить способ хранения (localStorage → cookie → memory)
 - Проще тестировать и поддерживать
+- Конфигурация загружается централизованно с бэкенда
+
+### 6. Централизованная конфигурация
+
+**Admin UI не знает о провайдере напрямую:**
+
+- Конфигурация (`providerUrl`, `clientId`) загружается с Admin Backend через `/api/config`
+- Кэширование конфигурации в `sessionStorage` (TTL 5 минут)
+- Fallback на значения по умолчанию при ошибке загрузки
+- Все настройки авторизации задаются в Admin Backend
+
+**Преимущества:**
+- ✅ Декoupling: Admin UI не зависит от конкретного провайдера
+- ✅ Гибкость: можно изменить провайдера без изменения фронтенда
+- ✅ Централизация: одна точка конфигурации (Admin Backend)
+- ✅ Простота: настройка только в одном месте
 
 ## Безопасность
 
@@ -358,9 +390,12 @@ sequenceDiagram
     participant Backend as Admin Backend<br/>(localhost:3002/api)
 
     User->>UI: 1. Открывает Admin UI
+    UI->>Backend: 1.1. Загрузка конфигурации (/api/config)
+    Backend->>UI: Возврат { providerUrl, clientId }
+    UI->>UI: Кэширование конфигурации
     UI->>UI: Проверка токена в localStorage
     alt Токен отсутствует
-        UI->>Client: 2. Редирект на /client/auth?client_id=admin-ui
+        UI->>Client: 2. Редирект на /client/auth?client_id=admin-ui<br/>(используя providerUrl из конфигурации)
         Client->>Client: Генерация PKCE, state, nonce
         Client->>Provider: 3. Редирект на /auth с параметрами OIDC
         Provider->>User: 4. Показывает форму логина
@@ -396,9 +431,10 @@ graph TB
     end
     
     subgraph "Admin Application"
-        UI[Admin UI<br/>Vue.js 3<br/>- Интерфейс пользователя<br/>- Управление токенами<br/>- API запросы]
-        Backend[Admin Backend<br/>Express.js<br/>- REST API<br/>- JWT валидация<br/>- Проверка ролей]
-        UI <--> Backend
+        UI[Admin UI<br/>Vue.js 3<br/>- Интерфейс пользователя<br/>- Управление токенами<br/>- API запросы<br/>- Загрузка конфигурации]
+        Backend[Admin Backend<br/>Express.js<br/>- REST API<br/>- /api/config<br/>- JWT валидация<br/>- Проверка ролей<br/>- Централизованная конфигурация]
+        UI -->|1. Загрузка конфигурации| Backend
+        UI <-->|2. API запросы| Backend
     end
     
     User[Пользователь] --> UI
@@ -444,21 +480,50 @@ const userAppRoles = {
 
 ### Admin UI
 
-**Конфигурация:**
+**Конфигурация загружается с Admin Backend:**
 ```javascript
 // packages/admin-ui/src/auth.js
-const PROVIDER_URL = 'http://localhost:3000';
-const CLIENT_ID = 'admin-ui';
+// Конфигурация НЕ хардкодится, а загружается с бэкенда
+
+// При инициализации приложения:
+const config = await loadAuthConfig();
+// GET /api/config
+// Ответ: { providerUrl: 'http://localhost:3000', clientId: 'admin-ui' }
+
+// Конфигурация кэшируется в sessionStorage (TTL 5 минут)
+// Fallback значения (если загрузка не удалась):
+// providerUrl: 'http://localhost:3000'
+// clientId: 'admin-ui'
 ```
 
 ### Admin Backend
 
-**Конфигурация:**
+**Конфигурация (единая точка настройки):**
 ```javascript
 // packages/admin-backend/index.js
-const PROVIDER_URL = 'http://localhost:3000';
-const CLIENT_ID = 'admin-ui';
+const PROVIDER_URL = process.env.PROVIDER_URL || 'http://localhost:3000';
+const CLIENT_ID = process.env.CLIENT_ID || 'admin-ui';
+
+// Endpoint для предоставления конфигурации клиентам
+app.get('/api/config', (req, res) => {
+  res.json({
+    providerUrl: PROVIDER_URL,
+    clientId: CLIENT_ID,
+  });
+});
+
+// JWT middleware использует ту же конфигурацию
+const { validateJWT, requireRole } = createJWTMiddleware({
+  providerUrl: PROVIDER_URL,
+  clientId: CLIENT_ID,
+});
 ```
+
+**Преимущества централизованной конфигурации:**
+- ✅ Все настройки авторизации в одном месте
+- ✅ Легко изменить провайдера (меняем только в Admin Backend)
+- ✅ Admin UI не знает о провайдере напрямую
+- ✅ Можно использовать переменные окружения для разных сред
 
 ## Заключение
 
@@ -469,3 +534,5 @@ const CLIENT_ID = 'admin-ui';
 - ✅ Автоматическую обработку истекших токенов
 - ✅ Защиту от replay-атак
 - ✅ Масштабируемость и производительность
+- ✅ Централизованную конфигурацию (Admin Backend - единая точка настройки)
+- ✅ Декoupling компонентов (Admin UI не знает о провайдере напрямую)
